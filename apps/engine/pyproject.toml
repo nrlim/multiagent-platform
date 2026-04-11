@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "agenthive-engine"
+version = "0.3.0"
+description = "AgentHive - Model-Agnostic Multi-Agent Execution Engine"
+authors = ["AgentHive Team"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.30.0"}
+langchain = "^0.3.0"
+langchain-google-genai = "^2.0.0"
+langchain-openai = "^0.2.0"
+langchain-anthropic = "^0.3.0"
+langchain-core = "^0.3.0"
+python-dotenv = "^1.0.0"
+pydantic = "^2.8.0"
+sse-starlette = "^2.1.0"
+aiofiles = "^24.1.0"
+httpx = "^0.27.0"
+# Phase 3: Event bus
+redis = {version = ">=5.0.0", extras = ["hiredis"]}
+# Phase 3: WebSocket support (included in fastapi[all])
+websockets = ">=13.0"
+# Phase 5: PostgreSQL persistence (optional, gracefully disabled if DB not configured)
+prisma = {version = ">=0.11.0", optional = true}
+
+[tool.poetry.extras]
+db = ["prisma"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.24.0"
+ruff = "^0.6.0"
+mypy = "^1.11.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true

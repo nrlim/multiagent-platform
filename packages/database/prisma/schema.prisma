@@ -1,0 +1,153 @@
+// AgentHive - Prisma Schema (Phase 5)
+// PostgreSQL database for full project persistence
+
+generator client {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Hive Sessions ──────────────────────────────────────────────────────────────
+model HiveSession {
+  id           String      @id @default(uuid())
+  prompt       String
+  provider     String
+  model        String
+  status       String      @default("idle")   // idle|running|completed|failed|killed
+  budget_limit Float       @default(2.0)       // USD kill-switch threshold
+  created_at   DateTime    @default(now())
+  completed_at DateTime?
+
+  // Relations
+  agents    AgentNode[]
+  logs      SessionLog[]
+  tokens    TokenUsage[]
+
+  @@map("hive_sessions")
+}
+
+// ── Agent Nodes ────────────────────────────────────────────────────────────────
+model AgentNode {
+  id         String   @id @default(uuid())
+  hive_id    String
+  role       String
+  status     String   @default("idle")   // idle|thinking|working|fixing|completed|error
+  parent_id  String?
+  task       String   @default("")
+  error_log  String?                     // last error message if status=error
+  heal_count Int      @default(0)        // number of self-heal attempts
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  hive HiveSession @relation(fields: [hive_id], references: [id], onDelete: Cascade)
+
+  @@index([hive_id])
+  @@map("agent_nodes")
+}
+
+// ── Session Logs ───────────────────────────────────────────────────────────────
+model SessionLog {
+  id         String   @id @default(uuid())
+  hive_id    String
+  agent_id   String
+  level      String   // info|warning|error|success
+  message    String
+  metadata   String   @default("{}") // JSON string
+  timestamp  DateTime @default(now())
+
+  // Relations
+  hive HiveSession @relation(fields: [hive_id], references: [id], onDelete: Cascade)
+
+  @@index([hive_id, agent_id])
+  @@index([timestamp])
+  @@map("session_logs")
+}
+
+// ── Token / Cost Tracking ──────────────────────────────────────────────────────
+model TokenUsage {
+  id                String   @id @default(uuid())
+  hive_id           String
+  provider          String
+  prompt_tokens     Int      @default(0)
+  completion_tokens Int      @default(0)
+  total_tokens      Int      @default(0)
+  cost_usd          Float    @default(0.0)
+  recorded_at       DateTime @default(now())
+
+  // Relations
+  hive HiveSession @relation(fields: [hive_id], references: [id], onDelete: Cascade)
+
+  @@index([hive_id])
+  @@map("token_usage")
+}
+
+// ── QA Results ─────────────────────────────────────────────────────────────────
+model QaResult {
+  id           String   @id @default(uuid())
+  hive_id      String
+  agent_id     String   // QA agent that ran the tests
+  test_file    String   // path to generated test file
+  passed       Boolean
+  output       String   // test run stdout/stderr
+  created_at   DateTime @default(now())
+
+  @@index([hive_id])
+  @@map("qa_results")
+}
+
+// ── Human-In-The-Loop Reviews ──────────────────────────────────────────────────
+model ReviewRequest {
+  id          String    @id @default(uuid())
+  hive_id     String
+  agent_id    String
+  status      String    @default("pending") // pending|approved|rejected
+  summary     String    // What needs review
+  created_at  DateTime  @default(now())
+  resolved_at DateTime?
+  reviewer_note String?
+
+  @@index([hive_id, status])
+  @@map("review_requests")
+}
+
+// ── Task Bucket (Phase 5) ───────────────────────────────────────────────────────
+// Persistent backlog of granular tasks for autonomous queue processing.
+model TaskBucket {
+  id                String    @id @default(uuid())
+
+  // Core fields
+  title             String
+  description       String    @default("")
+  priority          String    @default("MEDIUM")   // LOW | MEDIUM | HIGH
+  status            String    @default("PENDING")  // PENDING | IN_PROGRESS | COMPLETED | FAILED | CANCELLED
+
+  // Assignment (set when Manager picks the task)
+  hive_id           String?
+  assigned_agent_id String?
+  assigned_role     String?
+
+  // Execution history
+  error_log         String?   // last error message
+  retry_count       Int       @default(0)
+  max_retries       Int       @default(2)
+
+  // Debug-task linkage: when a task fails, a new debug task is created
+  parent_task_id    String?   // if this is a debug task, references the failed parent
+
+  // Timestamps
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  started_at        DateTime?
+  completed_at      DateTime?
+
+  @@index([status, priority])
+  @@index([hive_id])
+  @@index([parent_task_id])
+  @@map("task_bucket")
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@agenthive/database",
+  "version": "0.5.0",
+  "description": "Shared Prisma schema and database utilities for AgentHive",
+  "scripts": {
+    "db:migrate": "prisma migrate deploy",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio",
+    "db:push": "prisma db push"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.0.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.0.0"
+  }
+}
