@@ -72,6 +72,7 @@ class SwarmContext:
     budget_remaining: float = 2.0
     hive: object | None = None          # HiveSession — set by Swarm before calling routine
     last_worker_role: str = ""          # Tracks who the Guardian should re-route to
+    token_usage: dict = field(default_factory=dict)  # {role: {"input": N, "output": N, "cost": N}}
 
     def append_history(self, role: str, content: str) -> "SwarmContext":
         """Return a new context with an additional history entry (non-mutating pattern)."""
@@ -89,6 +90,7 @@ class SwarmContext:
             budget_remaining=self.budget_remaining,
             hive=self.hive,
             last_worker_role=self.last_worker_role,
+            token_usage=dict(self.token_usage),
         )
         return updated
 
@@ -108,6 +110,7 @@ class SwarmContext:
             budget_remaining=self.budget_remaining,
             hive=self.hive,
             last_worker_role=self.last_worker_role,
+            token_usage=dict(self.token_usage),
         )
         return updated
 
@@ -129,6 +132,7 @@ class SwarmContext:
             budget_remaining=self.budget_remaining,
             hive=self.hive,
             last_worker_role=self.last_worker_role,
+            token_usage=dict(self.token_usage),
         )
         return updated
 

@@ -18,7 +18,6 @@ from datetime import datetime
 from pathlib import Path
 
 from app.agents.factory import create_agent
-from app.agents.prompts import get_system_prompt
 from app.db import db_upsert_agent
 from app.events import emit_event
 from app.hive import (
@@ -30,6 +29,14 @@ from app.hive import (
 )
 from app.session import AgentNode
 from app.swarm.core import SwarmContext, SwarmRoutine, Transfer
+from app.token_optimizer import (
+    build_smart_context_block,
+    compress_system_prompt,
+    estimate_call_cost,
+    fast_path_dispatch,
+    prompt_token_report,
+    should_abort_for_budget,
+)
 from app.swarm.handoffs import (
     terminate_and_report,
     transfer_to_dispatcher,
@@ -73,6 +80,12 @@ async def _run_routine_llm(
 ) -> str:
     """
     Run an LLM call for a routine and emit THOUGHT events.
+
+    Token optimizations applied here:
+    - system_prompt is compressed (strips irrelevant skill sections for this role)
+    - Pre-flight budget check aborts early if estimated cost exceeds budget_remaining
+    - Token report is emitted as a log event for dashboard visibility
+
     Returns the raw LLM response text.
     """
     hive = ctx.hive
@@ -82,12 +95,35 @@ async def _run_routine_llm(
     def emit(lvl: str, msg: str) -> None:
         hive.add_log(lvl, f"[{routine_role.upper()}] {msg}", agent_id=node.id)
 
+    # ── Token Optimization: compress system prompt for this role ───────────────
+    compressed_system = compress_system_prompt(routine_role, system_prompt)
+
+    # ── Token Optimization: pre-flight budget check ────────────────────────────
+    estimated_cost = estimate_call_cost(
+        compressed_system, user_prompt, provider=hive.provider or "google"
+    )
+    if should_abort_for_budget(estimated_cost, ctx.budget_remaining):
+        raise RuntimeError(
+            f"[Swarm] Budget guard: estimated ${estimated_cost:.4f} exceeds "
+            f"remaining ${ctx.budget_remaining:.4f} — aborting {routine_role}"
+        )
+
+    # ── Token report (visible in dashboard logs) ───────────────────────────────
+    report = prompt_token_report(routine_role, system_prompt, user_prompt)
+    emit(
+        "info",
+        f"📊 Tokens → sys:{report['system_tokens_compressed']} "
+        f"(saved {report['system_savings_pct']}%) | "
+        f"user:{report['user_tokens']} | "
+        f"est_cost:${estimated_cost:.4f}",
+    )
+
     agent = create_agent(
         provider=hive.provider,
         model=hive.model,
         log_emitter=emit,
     )
-    agent.SYSTEM_PROMPT = system_prompt  # type: ignore[attr-defined]
+    agent.SYSTEM_PROMPT = compressed_system  # type: ignore[attr-defined]
 
     node.status = "working"
     emit_event(
@@ -217,17 +253,42 @@ class SwarmDispatcherRoutine(SwarmRoutine):
     available_transfers = ["uiux_scout", "logic_weaver", "pixel_crafter", "guardian"]
 
     async def run(self, ctx: SwarmContext) -> Transfer | str:
+        # ── Fast-path: skip LLM call if task keywords are unambiguous ─────────
+        fast_role = fast_path_dispatch(ctx.task_title, ctx.task_description or "")
+        if fast_role:
+            updated_ctx = ctx.append_history(
+                self.role, f"Fast-path routed to {fast_role} (no LLM call)"
+            )
+            logger.info("[SwarmDispatcher] Fast-path → %s (saved LLM call)", fast_role)
+            if fast_role == "uiux_scout":
+                return transfer_to_uiux_scout(updated_ctx, "Fast-path: UI/design keywords")
+            if fast_role == "pixel_crafter":
+                return transfer_to_pixel_crafter(updated_ctx, "Fast-path: frontend keywords")
+            if fast_role == "guardian":
+                return transfer_to_guardian(updated_ctx, "Fast-path: QA/test keywords")
+            return transfer_to_logic_weaver(updated_ctx, "Fast-path: backend keywords")
+
+        # ── Fallback: LLM-based routing for ambiguous tasks ───────────────────
         node = _make_agent_node(self.role, ctx)
-        context_block = ctx.build_context_block()
+        context_block = build_smart_context_block(
+            self.role,
+            ctx.handoff_chain,
+            ctx.artifact_bus,
+            ctx.context_variables,
+            ctx.history,
+        )
+
+        prior_context_section = f"## Prior Context\n{context_block}" if context_block else ""
+        handoff_instructions = self._build_handoff_instructions()
 
         user_prompt = f"""
 ## Task to Route
 **Title:** {ctx.task_title}
 **Description:** {ctx.task_description or "(No additional description)"}
 
-{f"## Prior Context{chr(10)}{context_block}" if context_block else ""}
+{prior_context_section}
 
-{self._build_handoff_instructions()}
+{handoff_instructions}
 """.strip()
 
         try:
@@ -237,7 +298,6 @@ class SwarmDispatcherRoutine(SwarmRoutine):
             actions = _extract_actions(response)
             swarm_action = _parse_swarm_action(response)
 
-            # Update artifact bus from any publish_artifact actions
             await _execute_file_and_shell_actions(
                 [a for a in actions if a.get("action") not in ("transfer_to_uiux_scout",
                  "transfer_to_logic_weaver", "transfer_to_pixel_crafter", "transfer_to_guardian")],
@@ -249,7 +309,7 @@ class SwarmDispatcherRoutine(SwarmRoutine):
             if swarm_action:
                 action_name, reason, _ = swarm_action
                 updated_ctx = ctx.append_history(
-                    self.role, f"Dispatched task to {action_name}: {reason}"
+                    self.role, f"LLM-routed to {action_name}: {reason}"
                 )
                 if action_name == "transfer_to_uiux_scout":
                     return transfer_to_uiux_scout(updated_ctx, reason)
@@ -257,11 +317,10 @@ class SwarmDispatcherRoutine(SwarmRoutine):
                     return transfer_to_pixel_crafter(updated_ctx, reason)
                 if action_name == "transfer_to_guardian":
                     return transfer_to_guardian(updated_ctx, reason)
-                # Default: logic_weaver
                 return transfer_to_logic_weaver(updated_ctx, reason)
 
-            # Fallback: infer from task keywords
-            updated_ctx = ctx.append_history(self.role, "Dispatched via keyword heuristic")
+            # Last resort keyword fallback (no LLM action parsed)
+            updated_ctx = ctx.append_history(self.role, "Dispatched via keyword fallback")
             text = (ctx.task_title + " " + (ctx.task_description or "")).lower()
             if any(k in text for k in ["ui", "frontend", "react", "component", "design", "css"]):
                 return transfer_to_pixel_crafter(updated_ctx, "Frontend keywords detected")
@@ -305,14 +364,20 @@ class UiUxScoutRoutine(SwarmRoutine):
 
     async def run(self, ctx: SwarmContext) -> Transfer | str:
         node = _make_agent_node(self.role, ctx)
-        context_block = ctx.build_context_block()
+        context_block = build_smart_context_block(
+            self.role, ctx.handoff_chain, ctx.artifact_bus,
+            ctx.context_variables, ctx.history,
+        )
+
+        prior_context_section = f"## Prior Context\n{context_block}" if context_block else ""
+        handoff_instructions = self._build_handoff_instructions()
 
         user_prompt = f"""
 ## Design Research Task
 **Title:** {ctx.task_title}
 **Description:** {ctx.task_description or "(No additional description)"}
 
-{f"## Prior Context{chr(10)}{context_block}" if context_block else ""}
+{prior_context_section}
 
 Research UX patterns for this task. Write `design-spec/spec.md` with:
 - Color palette (hex codes), typography, spacing system
@@ -324,7 +389,7 @@ Then publish with:
 {{"action": "publish_artifact", "topic": "design_spec", "payload": {{"spec_path": "design-spec/spec.md", "summary": "<one-sentence summary>"}}}}
 ```
 
-{self._build_handoff_instructions()}
+{handoff_instructions}
 """.strip()
 
         try:
@@ -388,19 +453,25 @@ class LogicWeaverRoutine(SwarmRoutine):
 
     async def run(self, ctx: SwarmContext) -> Transfer | str:
         node = _make_agent_node(self.role, ctx)
-        context_block = ctx.build_context_block()
+        context_block = build_smart_context_block(
+            self.role, ctx.handoff_chain, ctx.artifact_bus,
+            ctx.context_variables, ctx.history,
+        )
+
+        shared_context_section = f"## Shared Context\n{context_block}" if context_block else ""
+        handoff_instructions = self._build_handoff_instructions()
 
         user_prompt = f"""
 ## Backend Task
 **Title:** {ctx.task_title}
 **Description:** {ctx.task_description or "(No additional description)"}
 
-{f"## Shared Context{chr(10)}{context_block}" if context_block else ""}
+{shared_context_section}
 
 Build the server-side implementation following Clean Architecture.
 Write all files, then hand off to the Guardian for QA.
 
-{self._build_handoff_instructions()}
+{handoff_instructions}
 """.strip()
 
         try:
@@ -464,24 +535,32 @@ class PixelCrafterRoutine(SwarmRoutine):
 
     async def run(self, ctx: SwarmContext) -> Transfer | str:
         node = _make_agent_node(self.role, ctx)
-        context_block = ctx.build_context_block()
+        context_block = build_smart_context_block(
+            self.role, ctx.handoff_chain, ctx.artifact_bus,
+            ctx.context_variables, ctx.history,
+        )
 
         design_spec = ctx.context_variables.get("design_spec", {})
         api_spec = ctx.context_variables.get("api_spec", {})
+
+        design_spec_section = f"## Design Spec Available\n{json.dumps(design_spec, indent=2)[:600]}" if design_spec else ""
+        api_spec_section = f"## API Spec Available\n{json.dumps(api_spec, indent=2)[:400]}" if api_spec else ""
+        shared_context_section = f"## Shared Context\n{context_block}" if context_block else ""
+        handoff_instructions = self._build_handoff_instructions()
 
         user_prompt = f"""
 ## Frontend Task
 **Title:** {ctx.task_title}
 **Description:** {ctx.task_description or "(No additional description)"}
 
-{f"## Design Spec Available{chr(10)}{json.dumps(design_spec, indent=2)[:600]}" if design_spec else ""}
-{f"## API Spec Available{chr(10)}{json.dumps(api_spec, indent=2)[:400]}" if api_spec else ""}
-{f"## Shared Context{chr(10)}{context_block}" if context_block else ""}
+{design_spec_section}
+{api_spec_section}
+{shared_context_section}
 
 Build the frontend using Atomic Design. Write all component and page files.
 Then hand off to the Guardian for review.
 
-{self._build_handoff_instructions()}
+{handoff_instructions}
 """.strip()
 
         try:
@@ -544,7 +623,10 @@ class GuardianRoutine(SwarmRoutine):
 
     async def run(self, ctx: SwarmContext) -> Transfer | str:
         node = _make_agent_node(self.role, ctx)
-        context_block = ctx.build_context_block()
+        context_block = build_smart_context_block(
+            self.role, ctx.handoff_chain, ctx.artifact_bus,
+            ctx.context_variables, ctx.history,
+        )
 
         # Determine which developer to route back to if bugs found
         last_worker = ctx.last_worker_role or "logic_weaver"
@@ -553,14 +635,18 @@ class GuardianRoutine(SwarmRoutine):
         else:
             default_back_role = "logic_weaver"
 
+        shared_context_section = f"## Shared Context\n{context_block}" if context_block else ""
+        handoff_chain_str = " -> ".join(ctx.handoff_chain)
+        handoff_instructions = self._build_handoff_instructions()
+
         user_prompt = f"""
 ## QA Task
 **Title:** {ctx.task_title}
 **Description:** {ctx.task_description or "(No additional description)"}
 
-{f"## Shared Context{chr(10)}{context_block}" if context_block else ""}
+{shared_context_section}
 
-Hand-off chain so far: {' -> '.join(ctx.handoff_chain)}
+Hand-off chain so far: {handoff_chain_str}
 
 1. List all workspace files
 2. Review source files for Critical/Important/Minor issues
@@ -569,7 +655,7 @@ Hand-off chain so far: {' -> '.join(ctx.handoff_chain)}
    - All good → terminate_and_report with a full summary
    - Bugs found → transfer back to {default_back_role} with specific bug details in reason
 
-{self._build_handoff_instructions()}
+{handoff_instructions}
 """.strip()
 
         try:
