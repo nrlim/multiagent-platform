@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import {
   DragDropContext, Droppable, Draggable,
   type DropResult,
@@ -9,21 +10,22 @@ import {
 import {
   Plus, GripVertical, Clock, CheckCircle2, AlertCircle,
   Loader2, X, Bug, Play, StopCircle, AlertTriangle,
-  Zap, Inbox, Info,
+  Zap, Inbox, Info, ExternalLink, Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHiveStore } from "@/lib/store";
 import {
-  createBucketTask, deleteBucketTask, startBucketFactory, stopBucketFactory,
+  createBucketTask, updateBucketTask, deleteBucketTask,
+  startBucketFactory, stopBucketFactory, listBucketTasks,
   type BucketTask, type BucketPriority, type BucketStartResponse,
 } from "@/lib/engine-client";
 import { AddTaskModal } from "@/components/add-task-modal";
 
 // ─── Priority config ──────────────────────────────────────────────────────────
 const PRIORITY_CFG: Record<BucketPriority, { label: string; dot: string; cls: string }> = {
-  HIGH:   { label: "High",   dot: "bg-rose-400",   cls: "bg-rose-950/40 text-rose-300 border-rose-800/30" },
-  MEDIUM: { label: "Medium", dot: "bg-amber-400",  cls: "bg-amber-950/40 text-amber-300 border-amber-800/30" },
-  LOW:    { label: "Low",    dot: "bg-slate-500",  cls: "bg-slate-800/40 text-slate-400 border-slate-700/30" },
+  HIGH:   { label: "High",   dot: "bg-rose-500",   cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  MEDIUM: { label: "Medium", dot: "bg-amber-500",  cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  LOW:    { label: "Low",    dot: "bg-slate-500",  cls: "bg-slate-50 text-slate-600 border-slate-200" },
 };
 
 // ─── Kanban column definitions ────────────────────────────────────────────────
@@ -40,31 +42,34 @@ type KanbanCol = {
 const COLUMNS: KanbanCol[] = [
   {
     id: "backlog",    label: "Backlog",     statuses: ["PENDING"],
-    color: "text-slate-400",  border: "border-slate-700/40",
+    color: "text-slate-500",  border: "border-slate-200",
     icon: Inbox, description: "Inbound tasks waiting to be assigned",
   },
   {
     id: "in_progress", label: "In Progress", statuses: ["IN_PROGRESS"],
-    color: "text-indigo-400", border: "border-indigo-700/40",
+    color: "text-indigo-600", border: "border-indigo-200",
     icon: Loader2, description: "Currently being executed by an agent",
   },
   {
     id: "completed",  label: "Done",        statuses: ["COMPLETED"],
-    color: "text-emerald-400",border: "border-emerald-700/40",
+    color: "text-emerald-600",border: "border-emerald-200",
     icon: CheckCircle2, description: "Successfully completed tasks",
   },
   {
     id: "failed",     label: "Failed",      statuses: ["FAILED", "CANCELLED"],
-    color: "text-red-400",    border: "border-red-700/40",
+    color: "text-red-600",    border: "border-red-200",
     icon: AlertCircle, description: "Tasks that encountered errors",
   },
 ];
 
 // ─── Task Card ────────────────────────────────────────────────────────────────
 function KanbanCard({
-  task, index, onDelete,
+  task, index, onDelete, onEdit, onFocusTask,
 }: {
-  task: BucketTask; index: number; onDelete: (id: string) => void;
+  task: BucketTask; index: number;
+  onDelete: (id: string) => void;
+  onEdit: (task: BucketTask) => void;
+  onFocusTask?: (id: string) => void;
 }) {
   const pri     = PRIORITY_CFG[task.priority] ?? PRIORITY_CFG.MEDIUM;
   const isActive= task.status === "IN_PROGRESS";
@@ -80,15 +85,16 @@ function KanbanCard({
           ref={provided.innerRef}
           {...provided.draggableProps}
           className={cn(
-            "group relative rounded-xl border p-3.5 mb-2 transition-all duration-200 select-none",
-            snapshot.isDragging && "rotate-1 shadow-2xl shadow-black/50",
-            isActive && "border-indigo-600/50 bg-indigo-950/30 shadow-indigo-900/20 shadow-lg",
-            isDone   && "border-emerald-800/30 bg-slate-900/20 opacity-60",
-            isFailed && "border-red-800/30 bg-red-950/10",
-            isDebug  && "border-amber-800/30 bg-amber-950/10",
+            "group relative rounded-xl border p-4 mb-3 transition-all duration-200 select-none cursor-pointer",
+            snapshot.isDragging && "rotate-2 shadow-xl shadow-stone-200/50 ring-2 ring-indigo-500/20",
+            isActive && "border-indigo-200 bg-indigo-50/50 shadow-md shadow-indigo-100",
+            isDone   && "border-stone-200 bg-stone-50/80 opacity-70",
+            isFailed && "border-red-200 bg-red-50/80",
+            isDebug  && "border-amber-200 bg-amber-50/80",
             !isActive && !isDone && !isFailed && !isDebug &&
-              "border-slate-700/30 bg-[#111118]/80 hover:border-slate-600/50 hover:bg-[#111118]",
+              "border-stone-200 bg-white shadow-sm hover:border-stone-300 hover:shadow-md",
           )}
+          onClick={() => isActive && onFocusTask?.(task.id)}
         >
           {/* Grip handle */}
           <div
@@ -100,24 +106,34 @@ function KanbanCard({
 
           {/* Debug badge */}
           {isDebug && (
-            <div className="absolute -top-2 left-3 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-900/70 border border-amber-700/50 text-amber-300">
+            <div className="absolute -top-2 left-3 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 border border-amber-300 text-amber-800 shadow-sm">
               <Bug className="w-2.5 h-2.5" /> AUTO-DEBUG
             </div>
           )}
 
-          {/* Delete button (pending only) */}
+          {/* Edit + Delete buttons (PENDING only) */}
           {task.status === "PENDING" && (
-            <button
-              onClick={() => onDelete(task.id)}
-              className="absolute right-2 top-2 p-0.5 rounded text-slate-700 hover:text-red-400 hover:bg-red-950/40 opacity-0 group-hover:opacity-100 transition-all"
-            >
-              <X className="w-3 h-3" />
-            </button>
+            <div className="absolute right-2 top-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+              <button
+                onClick={(e) => { e.stopPropagation(); onEdit(task); }}
+                title="Edit task"
+                className="p-1 rounded-md text-stone-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(task.id); }}
+                title="Delete task"
+                className="p-1 rounded-md text-stone-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           )}
 
           {/* Content */}
           <div className="pl-4">
-            <p className="text-xs font-medium text-slate-200 leading-snug pr-4 mb-2">{task.title}</p>
+            <p className="text-xs font-medium text-slate-800 leading-snug pr-4 mb-2">{task.title}</p>
 
             {/* Tags row */}
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -129,14 +145,19 @@ function KanbanCard({
                 <span className="text-[10px] text-amber-500 font-mono">×{task.retry_count} retry</span>
               )}
               {task.assigned_role && isActive && (
-                <span className="text-[10px] text-indigo-300 font-semibold capitalize px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-800/30">
+                <span className="text-[10px] text-indigo-700 font-semibold capitalize px-1.5 py-0.5 rounded-md bg-indigo-50 border border-indigo-800/30">
                   → {task.assigned_role.replace(/_/g, " ")}
+                </span>
+              )}
+              {isActive && (
+                <span className="ml-auto text-[9px] text-indigo-600 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ExternalLink className="w-2.5 h-2.5" /> view agent
                 </span>
               )}
               {isFailed && task.error_log && (
                 <button
                   onClick={() => setShowError(v => !v)}
-                  className="text-[10px] text-red-400 flex items-center gap-0.5 hover:underline"
+                  className="text-[10px] text-red-600 flex items-center gap-0.5 hover:underline"
                 >
                   <Info className="w-2.5 h-2.5" /> error
                 </button>
@@ -153,7 +174,7 @@ function KanbanCard({
                 exit={{ height: 0, opacity: 0 }}
                 className="overflow-hidden"
               >
-                <p className="text-[10px] font-mono text-red-400/80 bg-red-950/40 rounded-lg p-2 mt-2 leading-relaxed whitespace-pre-wrap break-all line-clamp-4">
+                <p className="text-[10px] font-mono text-red-700 bg-red-50 border border-red-100 rounded-lg p-2.5 mt-2 leading-relaxed whitespace-pre-wrap break-all line-clamp-4">
                   {task.error_log}
                 </p>
               </motion.div>
@@ -178,19 +199,21 @@ function KanbanCard({
 
 // ─── Kanban Column ────────────────────────────────────────────────────────────
 function KanbanColumn({
-  col, tasks, onDelete, onAddClick,
+  col, tasks, onDelete, onEdit, onAddClick, onFocusTask,
 }: {
   col: KanbanCol; tasks: BucketTask[];
   onDelete: (id: string) => void;
+  onEdit: (task: BucketTask) => void;
   onAddClick?: () => void;
+  onFocusTask?: (id: string) => void;
 }) {
   const ColIcon = col.icon;
   const isActive = col.id === "in_progress";
 
   return (
-    <div className="flex flex-col min-w-[260px] max-w-[320px] flex-1">
+    <div className="flex flex-col min-w-[260px] max-w-[320px] flex-1 min-h-0">
       {/* Column header */}
-      <div className={cn("flex items-center justify-between px-3 py-3 mb-3 rounded-xl border", col.border, "bg-[#0d0d14]")}>
+      <div className={cn("flex items-center justify-between px-3.5 py-3 mb-3 rounded-xl border bg-white shadow-sm", col.border)}>
         <div className="flex items-center gap-2">
           {isActive ? (
             <motion.div animate={{ rotate: [0, 360] }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }}>
@@ -200,7 +223,7 @@ function KanbanColumn({
             <ColIcon className={cn("w-3.5 h-3.5", col.color)} />
           )}
           <span className={cn("text-xs font-bold", col.color)}>{col.label}</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-500 font-mono">
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-mono">
             {tasks.length}
           </span>
         </div>
@@ -209,22 +232,22 @@ function KanbanColumn({
             onClick={onAddClick}
             className="w-5 h-5 rounded-md bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-700/30 flex items-center justify-center transition-colors"
           >
-            <Plus className="w-3 h-3 text-indigo-400" />
+            <Plus className="w-3 h-3 text-indigo-600" />
           </button>
         )}
       </div>
 
-      {/* Drop zone */}
+      {/* Drop zone — independently scrollable */}
       <Droppable droppableId={col.id}>
         {(provided, snapshot) => (
           <div
             ref={provided.innerRef}
             {...provided.droppableProps}
             className={cn(
-              "flex-1 min-h-[200px] rounded-xl p-2 transition-all duration-200",
+              "flex-1 overflow-y-auto min-h-[120px] max-h-full rounded-xl p-2.5 transition-all duration-200 custom-scrollbar",
               snapshot.isDraggingOver
-                ? "bg-indigo-950/20 border border-indigo-700/30"
-                : "bg-transparent border border-transparent"
+                ? "bg-indigo-50/50 border border-indigo-200"
+                : "bg-stone-100/50 border border-transparent"
             )}
           >
             <AnimatePresence>
@@ -239,7 +262,7 @@ function KanbanColumn({
                 </motion.div>
               ) : (
                 tasks.map((task, index) => (
-                  <KanbanCard key={task.id} task={task} index={index} onDelete={onDelete} />
+                  <KanbanCard key={task.id} task={task} index={index} onDelete={onDelete} onEdit={onEdit} onFocusTask={onFocusTask} />
                 ))
               )}
             </AnimatePresence>
@@ -253,18 +276,39 @@ function KanbanColumn({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function BacklogPage() {
-  const { bucketTasks, setBucketTasks, isRunning, setIsRunning, setSessionStatus, setHiveId, provider, budgetLimit } = useHiveStore();
-  const [showModal,   setShowModal]   = useState(false);
-  const [isStarting,  setIsStarting]  = useState(false);
-  const [isStopping,  setIsStopping]  = useState(false);
+  const {
+    bucketTasks, setBucketTasks, isRunning, setIsRunning, setSessionStatus,
+    hiveId, setHiveId, provider, budgetLimit, setFocusedTaskId,
+  } = useHiveStore();
+  const router = useRouter();
+  const [showModal,    setShowModal]    = useState(false);
+  const [editingTask,  setEditingTask]  = useState<BucketTask | null>(null);
+  const [isStarting,   setIsStarting]   = useState(false);
+  const [isStopping,   setIsStopping]   = useState(false);
+  const [runQa,        setRunQa]        = useState(false);
   const [engineAvailable, setEngineAvailable] = useState<boolean | null>(null);
 
-  // Check engine
+  // Handle task click → navigate to orchestration + highlight agent node
+  const handleFocusTask = useCallback((taskId: string) => {
+    // Find the task: get agent id if in-progress
+    const task = bucketTasks.find(t => t.id === taskId);
+    if (!task) return;
+    // Set in store so orchestration page can highlight the agent
+    if (task.assigned_agent_id) {
+      setFocusedTaskId(task.assigned_agent_id);
+    }
+    router.push("/orchestration");
+  }, [bucketTasks, setFocusedTaskId, router]);
+
+  // Fetch true task state when mounting Kanban
   useEffect(() => {
-    fetch("/api/engine/bucket/tasks")
-      .then(r => setEngineAvailable(r.ok))
+    listBucketTasks()
+      .then(tasks => {
+        setEngineAvailable(true);
+        setBucketTasks(tasks);
+      })
       .catch(() => setEngineAvailable(false));
-  }, []);
+  }, [setBucketTasks]);
 
   const handleAddTask = useCallback(async (title: string, desc: string, priority: BucketPriority) => {
     if (engineAvailable) {
@@ -287,21 +331,40 @@ export default function BacklogPage() {
     setBucketTasks(bucketTasks.filter(t => t.id !== id));
   }, [engineAvailable, bucketTasks, setBucketTasks]);
 
+  const handleEditTask = useCallback(async (
+    title: string, desc: string, priority: BucketPriority
+  ) => {
+    if (!editingTask) return;
+    const updated = engineAvailable
+      ? await updateBucketTask(editingTask.id, { title, description: desc, priority })
+      : { ...editingTask, title, description: desc, priority };
+    if (updated) {
+      setBucketTasks(bucketTasks.map(t => t.id === editingTask.id ? updated as BucketTask : t));
+    }
+  }, [editingTask, engineAvailable, bucketTasks, setBucketTasks]);
+
   const handleStartFactory = useCallback(async () => {
     if (!engineAvailable) return;
     setIsStarting(true);
     try {
       const res: BucketStartResponse = await startBucketFactory({
-        provider, model: undefined, budget_limit: budgetLimit, run_qa: true, stop_on_failure: false,
+        provider,
+        model: undefined,
+        budget_limit: budgetLimit,
+        run_qa: runQa,
+        stop_on_failure: false,
+        hive_id: hiveId,         // reuse existing orchestration session if present
       });
       if (res.hive_id) {
         setHiveId(res.hive_id);
         setIsRunning(true);
         setSessionStatus("running");
+        // Navigate to orchestration so user sees the graph immediately
+        router.push("/orchestration");
       }
     } catch (e) { console.error("Factory start:", e); }
     finally { setIsStarting(false); }
-  }, [engineAvailable, provider, budgetLimit, setHiveId, setIsRunning, setSessionStatus]);
+  }, [engineAvailable, provider, budgetLimit, hiveId, runQa, setHiveId, setIsRunning, setSessionStatus, router]);
 
   const handleStopFactory = useCallback(async () => {
     if (!engineAvailable) return;
@@ -341,16 +404,16 @@ export default function BacklogPage() {
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* ── Topbar ────────────────────────────────────────────────────────── */}
-      <header className="glass-panel border-b border-white/5 flex items-center justify-between px-6 py-4 shrink-0">
+      <header className="glass-panel border-b border-slate-200 flex items-center justify-between px-6 py-4 shrink-0">
         <div>
-          <h1 className="text-lg font-bold text-slate-100">Task Backlog</h1>
+          <h1 className="text-lg font-bold text-slate-900">Task Backlog</h1>
           <p className="text-xs text-slate-500 mt-0.5">Kanban Board · Drag to reorder, agents auto-move cards</p>
         </div>
 
         <div className="flex items-center gap-3">
           {/* Engine status */}
           {engineAvailable === false && (
-            <div className="flex items-center gap-1.5 text-xs text-amber-400 px-2.5 py-1.5 rounded-lg bg-amber-950/30 border border-amber-800/30">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 shadow-sm">
               <AlertTriangle className="w-3.5 h-3.5" /> Engine offline
             </div>
           )}
@@ -360,20 +423,36 @@ export default function BacklogPage() {
             <button
               onClick={handleStopFactory}
               disabled={isStopping}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-red-950/40 border border-red-800/40 text-red-300 hover:bg-red-950/60 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50 shadow-sm"
             >
               {isStopping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <StopCircle className="w-3.5 h-3.5" />}
               {isStopping ? "Stopping…" : "Stop Factory"}
             </button>
           ) : (
-            <button
-              onClick={handleStartFactory}
-              disabled={isStarting || pendingCnt === 0}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:opacity-90 transition-opacity shadow-lg shadow-indigo-900/30 disabled:opacity-40 disabled:cursor-not-allowed"
+            <>
+              {/* QA Gate toggle */}
+              <button
+                onClick={() => setRunQa(v => !v)}
+                title={runQa ? "QA gate ON — disable for faster runs" : "QA gate OFF — enable to run automated QA checks"}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all shadow-sm",
+                  runQa
+                    ? "bg-amber-50 border-amber-200 text-amber-700"
+                    : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                )}
+              >
+                <span className={cn("w-1.5 h-1.5 rounded-full", runQa ? "bg-amber-400" : "bg-slate-600")} />
+                QA {runQa ? "ON" : "OFF"}
+              </button>
+              <button
+                onClick={handleStartFactory}
+                disabled={isStarting || pendingCnt === 0}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:opacity-90 transition-opacity shadow-lg shadow-indigo-900/30 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {isStarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
               {isStarting ? "Starting…" : pendingCnt === 0 ? "Add Tasks First" : `Start Factory (${pendingCnt})`}
-            </button>
+              </button>
+            </>
           )}
 
           <button
@@ -387,17 +466,17 @@ export default function BacklogPage() {
 
       {/* ── Progress Strip ───────────────────────────────────────────────── */}
       {bucketTasks.length > 0 && (
-        <div className="px-6 py-3 border-b border-white/5 flex items-center gap-4 shrink-0">
+        <div className="px-6 py-3 border-b border-slate-200 flex items-center gap-4 shrink-0">
           <div className="flex items-center gap-2 text-xs text-slate-500">
-            <Zap className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="font-semibold text-slate-300">
+            <Zap className="w-3.5 h-3.5 text-indigo-600" />
+            <span className="font-semibold text-slate-700">
               {bucketTasks.filter(t => t.status === "COMPLETED").length}
             </span>
             <span>of</span>
-            <span className="font-semibold text-slate-300">{bucketTasks.length}</span>
+            <span className="font-semibold text-slate-700">{bucketTasks.length}</span>
             <span>tasks complete</span>
           </div>
-          <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden max-w-sm">
+          <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden max-w-sm">
             <motion.div
               className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500"
               style={{
@@ -413,7 +492,7 @@ export default function BacklogPage() {
             <motion.div
               animate={{ opacity: [1, 0.5, 1] }}
               transition={{ duration: 1.4, repeat: Infinity }}
-              className="flex items-center gap-1.5 text-xs text-indigo-400 font-semibold"
+              className="flex items-center gap-1.5 text-xs text-indigo-600 font-semibold"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
               Factory running
@@ -423,16 +502,18 @@ export default function BacklogPage() {
       )}
 
       {/* ── Kanban Board ─────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
+      <div className="flex-1 overflow-auto p-6">
         <DragDropContext onDragEnd={handleDragEnd}>
-          <div className="flex gap-4 h-full min-w-max">
+          <div className="flex gap-4 h-full min-w-max min-h-[400px]">
             {COLUMNS.map((col) => (
               <KanbanColumn
                 key={col.id}
                 col={col}
                 tasks={colTasks(col)}
                 onDelete={handleDelete}
+                onEdit={(task) => setEditingTask(task)}
                 onAddClick={col.id === "backlog" ? () => setShowModal(true) : undefined}
+                onFocusTask={handleFocusTask}
               />
             ))}
           </div>
@@ -445,6 +526,13 @@ export default function BacklogPage() {
           <AddTaskModal
             onAdd={handleAddTask}
             onClose={() => setShowModal(false)}
+          />
+        )}
+        {editingTask && (
+          <AddTaskModal
+            initialTask={editingTask}
+            onAdd={handleEditTask}
+            onClose={() => setEditingTask(null)}
           />
         )}
       </AnimatePresence>

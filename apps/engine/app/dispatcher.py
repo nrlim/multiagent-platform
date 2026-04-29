@@ -1,49 +1,40 @@
 """
-AgentHive Engine - Bucket Dispatcher (Phase 5)
+AgentHive Engine - Bucket Dispatcher (Swarm Edition)
 
-The Dispatcher is the "Factory" that continuously drains the BucketQueue.
-It creates a single HiveSession whose Manager Agent processes tasks sequentially,
-with context stitching between tasks for code consistency.
+The Dispatcher drives the Factory loop that drains the BucketQueue.
+Each task is executed by the Agent Swarm starting from the SwarmDispatcher
+routine and autonomously handed off between specialist routines until the
+Guardian calls terminate_and_report.
 
 Flow:
-  1. User clicks "Start Factory" → POST /bucket/start
-  2. Dispatcher creates HiveSession, spawns Manager
-  3. Manager picks next PENDING task from queue
-  4. Manager delegates to a Worker (matching role or fresh spawn)
-  5. Worker completes → QA gate → mark COMPLETED → next task
-  6. If Worker fails → auto-retry → auto debug task
-  7. Factory stops when queue is empty or stop() is called
+  1. POST /bucket/start  → start_factory()
+  2. Factory dequeues BucketTask → _run_dispatcher_for_task()
+  3. SwarmContext built → run_swarm(entry="swarm_dispatcher")
+  4. Routines hand off autonomously: Dispatcher → [UiUxScout | LogicWeaver | PixelCrafter] → Guardian
+  5. Guardian terminates → task marked COMPLETED → next task
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 from app import config
-from app.agents.factory import create_agent
-from app.agents.prompts import get_system_prompt
 from app.bucket import bucket_queue, BucketTask
 from app.db import db_upsert_hive, db_upsert_agent, db_update_task_status
 from app.events import emit_event
 from app.hive import (
-    run_worker,
-    run_qa_agent,
-    EventedFileSystemTool,
-    EventedTerminalTool,
-    _extract_actions,
-    _accumulate_chars,
-    _is_killed,
     _hive_killed,
     _hive_char_counters,
-    _COST_PER_1K,
     _DEFAULT_BUDGET_LIMIT,
+    _is_killed,
 )
-from app.session import AgentNode, HiveSession, session_store
+from app.session import HiveSession, session_store
+
+from app.agents.factory import create_agent
+from app.agents.prompts import get_system_prompt
+from app.hive import _accumulate_chars, _extract_actions  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 
@@ -52,36 +43,179 @@ logger = logging.getLogger(__name__)
 _running_factories: dict[str, asyncio.Task] = {}
 
 
-# ── Dispatcher System Prompt ───────────────────────────────────────────────────
-DISPATCHER_PROMPT = """
-You are the AgentHive Dispatcher Agent — a senior technical manager running an
-autonomous software factory. Your job is to:
+async def run_business_analyst(
+    requirement: str,
+    hive: HiveSession,
+    provider: str | None = None,
+    model: str | None = None,
+    budget_limit: float = _DEFAULT_BUDGET_LIMIT,
+    run_qa: bool = False,
+) -> list[dict]:
+    """
+    Analyze & Plan flow — invoked by POST /hive/analyze.
 
-1. Receive a SINGLE granular task from the queue.
-2. Analyze what type of specialist is needed (backend_dev, frontend_dev,
-   database_architect, qa_engineer, devops_engineer, tech_writer).
-3. Spawn EXACTLY ONE worker for this task using a spawn_agent action block.
-4. Provide the worker with all necessary context from past completed tasks.
+    Spawns a Business Analyst agent that decomposes a business requirement
+    into granular create_task blocks and enqueues them to the bucket queue.
+    Then auto-starts the Agent Swarm factory on the same hive so the graph
+    stays alive and tasks start executing immediately.
 
-RULES:
-- Spawn exactly one agent per task dispatch.
-- Always include the full task description in the worker's task field.
-- Always include relevant context from previous tasks so the worker can
-  maintain code consistency.
-- Keep your analysis brief but thorough.
+    Returns the list of task dicts created.
+    """
+    import uuid as _uuid
+    from app.session import AgentNode
+    from datetime import datetime as _dt
 
-SPAWN FORMAT:
-```action
-{
-  "action": "spawn_agent",
-  "role": "<role>",
-  "task": "<full task description with all context>",
-  "instructions": "<specific technical instructions>"
-}
-```
+    hive_id   = hive.id
+    _provider = provider or hive.provider
+    _model    = model    or hive.model
 
-Begin.
-""".strip()
+    emit = lambda lvl, msg: hive.add_log(lvl, f"[ANALYZE] {msg}", agent_id="system")
+    emit("info", f"Starting Analyze & Plan: {requirement[:80]}…")
+
+    # ── Manager coordination node ──────────────────────────────────────────────
+    manager_id = str(_uuid.uuid4())
+    from app.events import emit_event as _emit_event
+    _emit_event("PREPARING_SPAWN", hive_id, manager_id,
+                {"role": "manager", "task_preview": f"Delegate: {requirement[:80]}"}, role="manager")
+
+    manager_node = AgentNode(
+        id=manager_id,
+        role="manager",
+        session_id=hive_id,
+        parent_id=None,
+        status="thinking",
+        specialized_task=f"Analyze: {requirement[:80]}",
+    )
+    hive.register_agent(manager_node)
+    _emit_event("SPAWN", hive_id, manager_id,
+                {"role": "manager", "task_preview": f"Delegate: {requirement[:80]}"},
+                role="manager", parent_id=None)
+    _emit_event("STATUS", hive_id, manager_id, {"status": "thinking", "role": "manager"}, role="manager")
+    await db_upsert_agent(manager_id, hive_id, "manager", "thinking", None, manager_node.specialized_task)
+
+    emit("info", "[MANAGER] Delegating requirement analysis to Business Analyst…")
+    await asyncio.sleep(0.3)
+    manager_node.status = "working"
+    _emit_event("STATUS", hive_id, manager_id, {"status": "working", "role": "manager"}, role="manager")
+
+    # ── Business Analyst node ──────────────────────────────────────────────────
+    ba_id = str(_uuid.uuid4())
+    _emit_event("PREPARING_SPAWN", hive_id, ba_id,
+                {"role": "business_analyst", "task_preview": f"Analyze: {requirement[:80]}",
+                 "parent_id": manager_id}, role="business_analyst")
+
+    ba_node = AgentNode(
+        id=ba_id,
+        role="business_analyst",
+        session_id=hive_id,
+        parent_id=manager_id,
+        status="thinking",
+        specialized_task=f"Analyze: {requirement[:80]}",
+    )
+    hive.register_agent(ba_node)
+    _emit_event("SPAWN", hive_id, ba_id,
+                {"role": "business_analyst", "task_preview": f"Analyze: {requirement[:80]}"},
+                role="business_analyst", parent_id=manager_id)
+    _emit_event("STATUS", hive_id, ba_id, {"status": "thinking", "role": "business_analyst"}, role="business_analyst")
+    await db_upsert_agent(ba_id, hive_id, "business_analyst", "thinking", manager_id, ba_node.specialized_task)
+
+    def ba_emit(lvl: str, msg: str) -> None:
+        hive.add_log(lvl, f"[BA] {msg}", agent_id=ba_id)
+
+    try:
+        ba_node.status = "working"
+        _emit_event("STATUS", hive_id, ba_id, {"status": "working", "role": "business_analyst"}, role="business_analyst")
+
+        agent = create_agent(provider=_provider, model=_model, log_emitter=ba_emit)
+        agent.SYSTEM_PROMPT = get_system_prompt("business_analyst")  # type: ignore
+
+        ba_prompt = f"""## Business Requirement to Analyze
+
+{requirement}
+
+Decompose this into 4–8 granular development tasks using `create_task` action blocks.
+Output ONLY action blocks. Do not write any code or explanations outside the blocks.
+"""
+        response = await agent.think(ba_prompt)
+        _accumulate_chars(hive_id, response)
+
+        for line in response.split("\n"):
+            line = line.strip()
+            if line:
+                _emit_event("THOUGHT", hive_id, ba_id, {"line": line}, role="business_analyst")
+
+        # Parse create_task blocks and enqueue
+        actions = _extract_actions(response)
+        created_tasks: list[dict] = []
+
+        for action in actions:
+            if action.get("action") != "create_task":
+                continue
+            title       = str(action.get("title", "Untitled Task"))[:200]
+            description = str(action.get("description", ""))
+            priority    = str(action.get("priority", "MEDIUM")).upper()
+            if priority not in ("HIGH", "MEDIUM", "LOW"):
+                priority = "MEDIUM"
+
+            task = await bucket_queue.enqueue(
+                title=title,
+                description=description,
+                priority=priority,
+            )
+            created_tasks.append(task.to_dict())
+
+            _emit_event("BUCKET_UPDATE", hive_id, "system", {
+                "task_id": task.id,
+                "status": "PENDING",
+                "title": title,
+                "priority": priority,
+                "source": "business_analyst",
+            })
+            ba_emit("success", f"Created task [{priority}]: {title[:60]}")
+
+        # Complete BA node
+        ba_node.status = "completed"
+        ba_node.completed_at = _dt.utcnow().isoformat()
+        _emit_event("STATUS", hive_id, ba_id, {"status": "completed", "role": "business_analyst"}, role="business_analyst")
+        _emit_event("DONE",   hive_id, ba_id, {"tasks_created": len(created_tasks)}, role="business_analyst")
+        await db_upsert_agent(ba_id, hive_id, "business_analyst", "completed", manager_id, ba_node.specialized_task)
+
+        emit("success", f"Analysis complete — {len(created_tasks)} tasks queued.")
+
+        # Complete Manager node
+        manager_node.status = "completed"
+        manager_node.completed_at = _dt.utcnow().isoformat()
+        _emit_event("STATUS", hive_id, manager_id, {"status": "completed", "role": "manager"}, role="manager")
+        await db_upsert_agent(manager_id, hive_id, "manager", "completed", None, manager_node.specialized_task)
+
+        # Auto-start the Swarm factory on the same hive if not already running
+        if created_tasks and not get_active_factory_hive_id():
+            emit("info", "Auto-starting Agent Swarm factory to execute queued tasks…")
+            await asyncio.sleep(0.5)
+            await start_factory(
+                provider=_provider,
+                model=_model,
+                budget_limit=budget_limit,
+                run_qa=run_qa,
+                stop_on_failure=False,
+                existing_hive_id=hive_id,
+            )
+        elif get_active_factory_hive_id():
+            emit("info", "Swarm factory already running — tasks added to queue.")
+
+        return created_tasks
+
+    except Exception as exc:
+        ba_node.status = "error"
+        _emit_event("STATUS", hive_id, ba_id, {"status": "error", "role": "business_analyst"}, role="business_analyst")
+        manager_node.status = "error"
+        _emit_event("STATUS", hive_id, manager_id, {"status": "error", "role": "manager"}, role="manager")
+        emit("error", f"Business Analyst failed: {exc}")
+        await db_upsert_agent(ba_id, hive_id, "business_analyst", "error", manager_id, ba_node.specialized_task)
+        await db_upsert_agent(manager_id, hive_id, "manager", "error", None, manager_node.specialized_task)
+        logger.exception("[BA] run_business_analyst failed")
+        return []
+
 
 
 async def _run_dispatcher_for_task(
@@ -91,20 +225,24 @@ async def _run_dispatcher_for_task(
     artifact_history: list[str],
     budget_limit: float,
     run_qa: bool,
-) -> bool:
+) -> tuple[bool, str]:
     """
-    Dispatch a single task from the bucket.
-    Returns True if task completed successfully, False if it failed.
+    Dispatch a single task from the bucket using the Agent Swarm engine.
+    Builds a SwarmContext from the BucketTask, runs the Swarm starting from
+    the swarm_dispatcher routine, and handles bucket state transitions.
+    Returns (success: bool, summary: str).
     """
+    from app.swarm.core import SwarmContext, run_swarm
+    from app.swarm.routines import build_default_swarm
+    from app.hive import _hive_char_counters
+
     hive_id = hive.id
-    emit = lambda level, msg: hive.add_log(level, f"[DISPATCHER] {msg}", agent_id="system")
+    emit = lambda level, msg: hive.add_log(level, f"[SWARM] {msg}", agent_id="system")
 
-    emit("info", f"Dispatching task: [{task.priority}] {task.title!r}")
+    emit("info", f"Swarm picking task: [{task.priority}] {task.title!r}")
 
-    # Mark task as in-progress in the queue + DB
+    # Mark task as in-progress in queue and DB
     await db_update_task_status(task.id, "IN_PROGRESS", hive_id=hive_id)
-
-    # Emit a bucket update event so the dashboard updates
     emit_event(
         "BUCKET_UPDATE",
         hive_id=hive_id,
@@ -117,162 +255,56 @@ async def _run_dispatcher_for_task(
         },
     )
 
-    # Build context block from artifact history
-    context_summary = ""
+    # Pass prior artifact summaries as context variables
+    prior_context: dict = {}
     if artifact_history:
-        context_summary = "## Context from completed tasks:\n" + "\n\n".join(
-            f"### Task {i+1}:\n{summary}" for i, summary in enumerate(artifact_history[-3:])
-        )
+        prior_context["prior_tasks"] = artifact_history[-3:]
 
-    dispatcher_prompt = f"""
-{context_summary}
+    # Estimate remaining budget
+    chars_used = _hive_char_counters.get(hive_id, 0)
+    cost_used = (chars_used / 4 / 1000) * 0.003
+    budget_remaining = max(0.0, budget_limit - cost_used)
 
-## Current Task to Dispatch
-**Title:** {task.title}
-**Priority:** {task.priority}
-**Description:**
-{task.description or "(No additional description provided)"}
+    # Snapshot message bus for context injection
+    artifact_bus: dict = {}
+    for topic, messages in hive.message_bus.get_all().items():
+        if messages:
+            artifact_bus[topic] = messages[-1]
 
-Analyze this task and spawn the appropriate specialist agent.
-""".strip()
-
-    # ── Spawn Manager/Dispatcher agent ────────────────────────────────────────
-    manager_node = AgentNode(
-        id=str(uuid.uuid4()),
-        role="manager",
-        session_id=hive_id,
-        parent_id=None,
-        status="thinking",
-        specialized_task=f"Dispatch: {task.title}",
+    ctx = SwarmContext(
+        hive_id=hive_id,
+        task_id=task.id,
+        task_title=task.title,
+        task_description=task.description or "",
+        context_variables=prior_context,
+        artifact_bus=artifact_bus,
+        session_dir=session_dir,
+        budget_remaining=budget_remaining,
+        hive=hive,
     )
-    hive.register_agent(manager_node)
-    emit_event("SPAWN", hive_id, manager_node.id,
-               {"role": "manager", "task_preview": f"Dispatch: {task.title[:80]}"}, role="manager")
-    emit_event("STATUS", hive_id, manager_node.id,
-               {"status": "thinking", "role": "manager"}, role="manager")
-    await db_upsert_agent(manager_node.id, hive_id, "manager", "thinking", None, task.title)
-
-    def manager_emit(level: str, msg: str) -> None:
-        hive.add_log(level, f"[MANAGER] {msg}", agent_id=manager_node.id)
 
     try:
-        manager_agent = create_agent(
-            provider=hive.provider,
-            model=hive.model,
-            log_emitter=manager_emit,
+        routines = build_default_swarm()
+        final_output = await run_swarm(
+            routines=routines,
+            entry_role="swarm_dispatcher",
+            ctx=ctx,
         )
-        manager_agent.SYSTEM_PROMPT = DISPATCHER_PROMPT  # type: ignore
-
-        manager_node.status = "working"
-        emit_event("STATUS", hive_id, manager_node.id,
-                   {"status": "working", "role": "manager"}, role="manager")
-
-        emit_event("THOUGHT", hive_id, manager_node.id,
-                   {"line": f"Analyzing: {task.title}"}, role="manager")
-
-        response = await manager_agent.think(dispatcher_prompt)
-        _accumulate_chars(hive_id, response)
-
-        for line in response.split("\n"):
-            line = line.strip()
-            if line:
-                emit_event("THOUGHT", hive_id, manager_node.id, {"line": line}, role="manager")
-
-        # Extract spawn action
-        actions = _extract_actions(response)
-        spawn_actions = [a for a in actions if a.get("action") == "spawn_agent"]
-
-        if not spawn_actions:
-            manager_emit("warning", "No spawn_agent found — running task directly as backend_dev")
-            spawn_actions = [{
-                "action": "spawn_agent",
-                "role": "backend_dev",
-                "task": f"{task.title}\n\n{task.description}",
-                "instructions": "Complete this task thoroughly. Write all output files.",
-            }]
-
-        # Take first spawn (we dispatch one worker per task)
-        sa = spawn_actions[0]
-        role = sa.get("role", "backend_dev")
-        worker_task = sa.get("task", f"{task.title}\n\n{task.description}")
-        instructions = sa.get("instructions", "Complete this task thoroughly.")
-
-        worker_node = AgentNode(
-            id=str(uuid.uuid4()),
-            role=role,
-            session_id=hive_id,
-            parent_id=manager_node.id,
-            status="idle",
-            specialized_task=worker_task,
-            local_context={"instructions": instructions},
+        await bucket_queue.mark_completed(task.id)
+        emit_event(
+            "BUCKET_UPDATE",
+            hive_id=hive_id,
+            agent_id="system",
+            data={"task_id": task.id, "status": "COMPLETED", "title": task.title},
         )
-        hive.register_agent(worker_node)
-
-        emit_event("SPAWN", hive_id, worker_node.id,
-                   {"role": role, "task_preview": worker_task[:120], "parent_id": manager_node.id},
-                   role=role)
-
-        await db_upsert_agent(worker_node.id, hive_id, role, "idle", manager_node.id, worker_task)
-
-        manager_node.status = "completed"
-        emit_event("STATUS", hive_id, manager_node.id,
-                   {"status": "completed", "role": "manager"}, role="manager")
-        await db_upsert_agent(manager_node.id, hive_id, "manager", "completed", None, task.title)
-
-        # ── Run Worker ────────────────────────────────────────────────────────
-        await run_worker(worker_node, hive, session_dir)
-
-        # ── QA Gate ───────────────────────────────────────────────────────────
-        qa_passed = True
-        if run_qa:
-            emit("info", "Running QA gate...")
-            qa_passed = await run_qa_agent(
-                hive=hive,
-                session_dir=session_dir,
-                parent_id=worker_node.id,
-                artifact_summary=f"Task: {task.title}\n{task.description}\n\nRole: {role}",
-            )
-            if qa_passed:
-                emit("success", f"QA gate passed for task: {task.title!r}")
-            else:
-                emit("warning", f"QA gate had issues for task: {task.title!r}")
-
-        if worker_node.status == "completed":
-            await bucket_queue.mark_completed(task.id)
-            emit_event(
-                "BUCKET_UPDATE",
-                hive_id=hive_id,
-                agent_id="system",
-                data={
-                    "task_id": task.id,
-                    "status": "COMPLETED",
-                    "title": task.title,
-                    "qa_passed": qa_passed,
-                },
-            )
-            # Build artifact summary for context stitching
-            summary = (
-                f"**[{role.replace('_', ' ').title()}]** completed: {task.title}\n"
-                f"QA: {'PASSED' if qa_passed else 'ISSUES'}\n"
-                f"Task description: {task.description[:200]}"
-            )
-            return True, summary
-
-        else:
-            error = f"Worker {role} finished with status: {worker_node.status}"
-            await bucket_queue.mark_failed(task.id, error=error)
-            emit_event(
-                "BUCKET_UPDATE",
-                hive_id=hive_id,
-                agent_id="system",
-                data={"task_id": task.id, "status": "FAILED", "error": error},
-            )
-            return False, ""
+        summary = f"[Swarm] {task.title}: {final_output[:300]}"
+        emit("success", f"Swarm completed: {task.title!r}")
+        return True, summary
 
     except Exception as exc:
         error_msg = f"{type(exc).__name__}: {exc}"
-        logger.error(f"[Dispatcher] Task {task.id[:8]} failed: {error_msg}")
-        emit("error", f"Task dispatch error: {error_msg}")
+        logger.error("[Swarm] Task %s failed: %s", task.id[:8], error_msg)
+        emit("error", f"Swarm error: {error_msg}")
         await bucket_queue.mark_failed(task.id, error=error_msg)
         emit_event(
             "BUCKET_UPDATE",
@@ -281,7 +313,6 @@ Analyze this task and spawn the appropriate specialist agent.
             data={"task_id": task.id, "status": "FAILED", "error": error_msg},
         )
         return False, ""
-
 
 async def run_factory(
     hive: HiveSession,
@@ -420,18 +451,33 @@ async def start_factory(
     provider: str,
     model: str,
     budget_limit: float = _DEFAULT_BUDGET_LIMIT,
-    run_qa: bool = True,
+    run_qa: bool = False,
     stop_on_failure: bool = False,
+    existing_hive_id: str | None = None,
 ) -> HiveSession:
     """
-    Create a HiveSession and launch the factory loop as a background task.
+    Create (or reuse) a HiveSession and launch the factory loop as a background task.
+    If existing_hive_id is given and the session exists, the factory runs inside that
+    session so the Orchestration graph stays on the same hive.
     Called by POST /bucket/start.
     """
-    hive = session_store.create_hive(
-        provider=provider,
-        model=model,
-        prompt="(factory mode — draining task bucket)",
-    )
+    # Reuse an existing session if requested
+    if existing_hive_id:
+        hive = session_store.get_hive(existing_hive_id)
+        if hive is None:
+            # Session expired — create a fresh one with the same id
+            hive = session_store.create_hive(
+                provider=provider,
+                model=model,
+                prompt="(factory mode — draining task bucket)",
+                hive_id=existing_hive_id,
+            )
+    else:
+        hive = session_store.create_hive(
+            provider=provider,
+            model=model,
+            prompt="(factory mode — draining task bucket)",
+        )
     task = asyncio.create_task(
         run_factory(hive, budget_limit=budget_limit, run_qa=run_qa, stop_on_failure=stop_on_failure)
     )

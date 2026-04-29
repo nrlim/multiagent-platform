@@ -32,6 +32,16 @@ export function computeDagreLayout(
     }
   }
 
+  // ── Chain sequential root managers so dagre lays them out in order ──────────
+  // Factory mode creates multiple Managers with no parent; link them temporally.
+  const rootManagers = agents
+    .filter(a => a.role === "manager" && !a.parent_id)
+    .sort((a, b) => (a.created_at > b.created_at ? 1 : -1));
+
+  for (let i = 1; i < rootManagers.length; i++) {
+    g.setEdge(rootManagers[i - 1].id, rootManagers[i].id);
+  }
+
   dagre.layout(g);
 
   const positions: Record<string, { x: number; y: number }> = {};

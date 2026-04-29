@@ -260,16 +260,22 @@ class SessionStore:
         return False
 
     # --- Phase-2 Hive sessions ---
-    def create_hive(self, provider: str, model: str, prompt: str) -> HiveSession:
-        session_id = str(uuid.uuid4())
+    def create_hive(
+        self,
+        provider: str,
+        model: str,
+        prompt: str,
+        hive_id: str | None = None,
+    ) -> HiveSession:
+        sid = hive_id or str(uuid.uuid4())
         hive = HiveSession(
-            id=session_id,
+            id=sid,
             provider=provider,
             model=model,
             prompt=prompt,
             status="idle",
         )
-        self._hive_sessions[session_id] = hive
+        self._hive_sessions[sid] = hive
         return hive
 
     def get_hive(self, session_id: str) -> HiveSession | None:

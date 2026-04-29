@@ -15,20 +15,30 @@ const EVENT_STYLE: Record<EventType, {
   bg: string;
   label: string;
 }> = {
-  SPAWN:       { icon: Package,       color: "text-violet-400",  bg: "bg-violet-500/10 border-violet-500/20",  label: "Spawn" },
-  STATUS:      { icon: CheckCircle2,  color: "text-slate-400",   bg: "bg-slate-500/10 border-slate-500/20",    label: "Status" },
-  THOUGHT:     { icon: Brain,         color: "text-indigo-400",  bg: "bg-indigo-500/10 border-indigo-500/20",  label: "Thought" },
-  TOOL_CALL:   { icon: Zap,          color: "text-amber-400",   bg: "bg-amber-500/10 border-amber-500/20",    label: "Tool" },
-  SHELL_OUTPUT:{ icon: TerminalIcon,  color: "text-cyan-400",    bg: "bg-cyan-500/10 border-cyan-500/20",      label: "Shell" },
-  ARTIFACT:    { icon: Package,       color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20",label: "Artifact" },
-  FILE_CHANGE: { icon: FileEdit,      color: "text-blue-400",    bg: "bg-blue-500/10 border-blue-500/20",      label: "File" },
-  DONE:        { icon: CheckCircle2,  color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20",label: "Done" },
-  ERROR:       { icon: AlertTriangle, color: "text-red-400",     bg: "bg-red-500/10 border-red-500/20",        label: "Error" },
-  LOG:         { icon: TerminalIcon,  color: "text-slate-500",   bg: "bg-slate-800/30 border-slate-700/20",    label: "Log" },
-  CHAT:        { icon: Brain,         color: "text-violet-300",  bg: "bg-violet-500/5 border-transparent",     label: "Chat" },
-  keepalive:   { icon: CheckCircle2,  color: "text-slate-700",   bg: "bg-transparent border-transparent",      label: "" },
-  pong:        { icon: CheckCircle2,  color: "text-slate-700",   bg: "bg-transparent border-transparent",      label: "" },
+  SPAWN:          { icon: Package,       color: "text-violet-400",  bg: "bg-violet-500/10 border-violet-500/20",  label: "Spawn" },
+  PREPARING_SPAWN:{ icon: Package,       color: "text-violet-300",  bg: "bg-violet-500/5 border-transparent",     label: "Preparing" },
+  STATUS:         { icon: CheckCircle2,  color: "text-slate-500",   bg: "bg-slate-500/10 border-slate-500/20",    label: "Status" },
+  THOUGHT:        { icon: Brain,         color: "text-indigo-600",  bg: "bg-indigo-50/50 border-indigo-200",  label: "Thought" },
+  TOOL_CALL:      { icon: Zap,          color: "text-amber-600",   bg: "bg-amber-500/10 border-amber-500/20",    label: "Tool" },
+  SHELL_OUTPUT:   { icon: TerminalIcon,  color: "text-cyan-400",    bg: "bg-cyan-500/10 border-cyan-500/20",      label: "Shell" },
+  ARTIFACT:       { icon: Package,       color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200",label: "Artifact" },
+  FILE_CHANGE:    { icon: FileEdit,      color: "text-blue-400",    bg: "bg-blue-500/10 border-blue-500/20",      label: "File" },
+  REVIEW_LOG:     { icon: CheckCircle2,  color: "text-indigo-600",  bg: "bg-indigo-50/50 border-indigo-200",  label: "Review" },
+  DESIGN_SPEC:    { icon: Package,       color: "text-violet-400",  bg: "bg-violet-500/10 border-violet-500/20",  label: "Design Spec" },
+  DONE:           { icon: CheckCircle2,  color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200",label: "Done" },
+  ERROR:          { icon: AlertTriangle, color: "text-red-600",     bg: "bg-red-500/10 border-red-500/20",        label: "Error" },
+  LOG:            { icon: TerminalIcon,  color: "text-slate-500",   bg: "bg-slate-100/30 border-slate-200/20",    label: "Log" },
+  CHAT:           { icon: Brain,         color: "text-violet-300",  bg: "bg-violet-500/5 border-transparent",     label: "Chat" },
+  BUCKET_UPDATE:  { icon: CheckCircle2,  color: "text-indigo-600",  bg: "bg-indigo-500/5 border-transparent",     label: "Bucket" },
+  FACTORY_START:  { icon: Zap,          color: "text-indigo-600",  bg: "bg-indigo-500/5 border-transparent",     label: "Factory" },
+  FACTORY_PROGRESS:{ icon: Zap,         color: "text-slate-500",   bg: "bg-transparent border-transparent",      label: "" },
+  FACTORY_DONE:   { icon: CheckCircle2,  color: "text-emerald-600", bg: "bg-emerald-500/5 border-transparent",    label: "Factory Done" },
+  HANDOFF:        { icon: Zap,           color: "text-violet-400",  bg: "bg-violet-500/10 border-violet-500/20",  label: "Handoff" },
+  SWARM_DONE:     { icon: CheckCircle2,  color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200",label: "Swarm Done" },
+  keepalive:      { icon: CheckCircle2,  color: "text-slate-700",   bg: "bg-transparent border-transparent",      label: "" },
+  pong:           { icon: CheckCircle2,  color: "text-slate-700",   bg: "bg-transparent border-transparent",      label: "" },
 };
+
 
 // ─── Extract displayable text from event data ─────────────────────────────────
 function extractText(event: HiveEvent): string {
@@ -92,7 +102,7 @@ function FeedItem({ event, agentRole }: FeedItemProps) {
         </div>
         <p className={cn(
           "text-xs leading-snug break-words",
-          event.event_type === "THOUGHT" ? "text-indigo-300/80 italic" : "text-slate-300",
+          event.event_type === "THOUGHT" ? "text-indigo-700/80 italic" : "text-slate-700",
           event.event_type === "SHELL_OUTPUT" && "text-cyan-300/80 text-[10px]",
           event.event_type === "ERROR" && "text-red-300",
         )}>

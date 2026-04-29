@@ -71,46 +71,46 @@ function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
         transition={{ type: "spring", stiffness: 380, damping: 30 }}
         className="glass-panel rounded-2xl w-full max-w-md mx-4 shadow-2xl shadow-black/50"
       >
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-white/5">
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-200">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center">
-              <Plus className="w-3.5 h-3.5 text-indigo-400" />
+              <Plus className="w-3.5 h-3.5 text-indigo-600" />
             </div>
-            <h2 className="text-sm font-semibold text-slate-100">Add Task to Bucket</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Add Task to Bucket</h2>
           </div>
-          <button onClick={onClose} className="p-1 rounded-md text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 transition-colors">
+          <button onClick={onClose} className="p-1 rounded-md text-slate-500 hover:text-slate-700 hover:bg-slate-700/50 transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div>
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5 block">Title *</label>
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5 block">Title *</label>
             <input
               ref={titleRef}
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Implement user authentication API"
-              className="w-full px-3 py-2.5 rounded-xl bg-slate-900/70 border border-slate-700/60 text-sm text-slate-100 placeholder-slate-600
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder-slate-600
                 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 transition-colors"
             />
           </div>
 
           <div>
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5 block">Description</label>
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5 block">Description</label>
             <textarea
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
               placeholder="Optional context or acceptance criteria..."
               rows={3}
-              className="w-full px-3 py-2.5 rounded-xl bg-slate-900/70 border border-slate-700/60 text-sm text-slate-100 placeholder-slate-600
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder-slate-600
                 focus:outline-none focus:ring-1 focus:ring-indigo-500/60 focus:border-indigo-500/40 transition-colors resize-none"
             />
           </div>
 
           <div>
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5 block">Priority</label>
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1.5 block">Priority</label>
             <div className="flex gap-2">
               {(["LOW", "MEDIUM", "HIGH"] as BucketPriority[]).map((p) => {
                 const cfg = PRIORITY_CFG[p];
@@ -122,7 +122,7 @@ function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
                     onClick={() => setPriority(p)}
                     className={cn(
                       "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold border transition-all",
-                      sel ? cfg.cls + " ring-1 ring-inset ring-current/30" : "bg-slate-800/60 text-slate-500 border-slate-700/40 hover:border-slate-600"
+                      sel ? cfg.cls + " ring-1 ring-inset ring-current/30" : "bg-slate-100 text-slate-500 border-slate-200 hover:border-slate-600"
                     )}
                   >
                     <span className={cn("w-2 h-2 rounded-full", cfg.dot)} />
@@ -135,7 +135,7 @@ function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
 
           <div className="flex gap-2 pt-1">
             <button type="button" onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors">
+              className="flex-1 py-2.5 rounded-xl text-xs font-semibold border border-slate-200 text-slate-500 hover:text-slate-800 hover:border-slate-600 transition-colors">
               Cancel
             </button>
             <button
@@ -179,15 +179,15 @@ function TaskCard({ task, onDelete, onUpdatePriority }: TaskCardProps) {
       className={cn(
         "group relative rounded-xl border p-3 transition-all duration-200",
         isActive && "border-indigo-600/50 bg-indigo-950/30 animate-task-highlight",
-        isDone   && "border-emerald-800/30 bg-slate-900/30 opacity-70",
+        isDone   && "border-emerald-800/30 bg-slate-50 opacity-70",
         isFailed && "border-red-800/30 bg-red-950/10",
         isDebug  && "border-amber-800/30 bg-amber-950/10",
-        !isActive && !isDone && !isFailed && !isDebug && "border-slate-700/30 bg-slate-900/50 hover:border-slate-600/50 hover:bg-slate-900/80",
+        !isActive && !isDone && !isFailed && !isDebug && "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100",
       )}
     >
       {/* Debug badge */}
       {isDebug && (
-        <div className="absolute -top-1.5 left-3 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-900/70 border border-amber-700/50 text-amber-300">
+        <div className="absolute -top-1.5 left-3 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-900/70 border border-amber-700/50 text-amber-700">
           <Bug className="w-2.5 h-2.5" /> AUTO-DEBUG
         </div>
       )}
@@ -197,7 +197,7 @@ function TaskCard({ task, onDelete, onUpdatePriority }: TaskCardProps) {
         {task.status === "PENDING" && (
           <button
             onClick={() => onDelete(task.id)}
-            className="p-0.5 rounded text-slate-600 hover:text-red-400 hover:bg-red-950/40 transition-colors"
+            className="p-0.5 rounded text-slate-600 hover:text-red-600 hover:bg-red-950/40 transition-colors"
           >
             <X className="w-3 h-3" />
           </button>
@@ -205,7 +205,7 @@ function TaskCard({ task, onDelete, onUpdatePriority }: TaskCardProps) {
       </div>
 
       {/* Title */}
-      <p className="text-xs font-medium text-slate-200 leading-snug pr-5 mb-2">{task.title}</p>
+      <p className="text-xs font-medium text-slate-800 leading-snug pr-5 mb-2">{task.title}</p>
 
       {/* Tags */}
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -220,7 +220,7 @@ function TaskCard({ task, onDelete, onUpdatePriority }: TaskCardProps) {
           <span className="text-[10px] text-amber-500 font-mono">×{task.retry_count} retry</span>
         )}
         {task.assigned_role && isActive && (
-          <span className="text-[10px] text-indigo-300 font-semibold capitalize px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-800/30">
+          <span className="text-[10px] text-indigo-700 font-semibold capitalize px-1.5 py-0.5 rounded-md bg-indigo-50 border border-indigo-800/30">
             → {task.assigned_role.replace(/_/g, " ")}
           </span>
         )}
@@ -230,7 +230,7 @@ function TaskCard({ task, onDelete, onUpdatePriority }: TaskCardProps) {
       {isFailed && task.error_log && (
         <details className="mt-1.5">
           <summary className="text-[10px] text-red-500 cursor-pointer">View error</summary>
-          <p className="mt-1 text-[10px] font-mono text-red-400/80 bg-red-950/40 rounded p-1.5 leading-relaxed whitespace-pre-wrap break-all line-clamp-4">
+          <p className="mt-1 text-[10px] font-mono text-red-600/80 bg-red-950/40 rounded p-1.5 leading-relaxed whitespace-pre-wrap break-all line-clamp-4">
             {task.error_log}
           </p>
         </details>
@@ -278,16 +278,16 @@ function FactoryControls({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs">
-              <Zap className="w-3 h-3 text-indigo-400" />
-              <span className="font-semibold text-slate-300">{done}/{total}</span>
+              <Zap className="w-3 h-3 text-indigo-600" />
+              <span className="font-semibold text-slate-700">{done}/{total}</span>
               <span className="text-slate-600">tasks</span>
               {failed > 0 && (
-                <span className="text-red-400 font-semibold">{failed} failed</span>
+                <span className="text-red-600 font-semibold">{failed} failed</span>
               )}
             </div>
             <span className="text-xs font-mono text-slate-500">{pct}%</span>
           </div>
-          <div className="h-1.5 w-full rounded-full bg-slate-800/80 overflow-hidden">
+          <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
             {/* Completed */}
             <motion.div
               className="h-full rounded-full bg-emerald-500"
@@ -303,7 +303,7 @@ function FactoryControls({
                 animate={{ opacity: [1, 0.3, 1] }}
                 transition={{ duration: 1.4, repeat: Infinity }}
               />
-              <span className="text-[10px] text-indigo-400 font-medium">
+              <span className="text-[10px] text-indigo-600 font-medium">
                 Factory running — {pending} task{pending !== 1 ? "s" : ""} remaining
               </span>
             </div>
@@ -502,10 +502,10 @@ export function TaskBucket({
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
         <div className="flex items-center gap-2">
-          <Inbox className="w-4 h-4 text-indigo-400" />
-          <span className="text-sm font-semibold text-slate-200">Task Bucket</span>
+          <Inbox className="w-4 h-4 text-indigo-600" />
+          <span className="text-sm font-semibold text-slate-800">Task Bucket</span>
           {pendingCnt > 0 && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700/50">
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
               {pendingCnt}
             </span>
           )}
@@ -539,7 +539,7 @@ export function TaskBucket({
         <div className="flex items-center gap-2 px-4 pb-2 shrink-0">
           {activeCnt > 0 && (
             <motion.span animate={{ opacity: [1, 0.6, 1] }} transition={{ duration: 1.4, repeat: Infinity }}
-              className="text-[10px] text-indigo-400 font-semibold">
+              className="text-[10px] text-indigo-600 font-semibold">
               {activeCnt} running
             </motion.span>
           )}
@@ -570,15 +570,15 @@ export function TaskBucket({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks..."
-            className="w-full pl-8 pr-8 py-2 rounded-lg bg-slate-900/60 border border-slate-700/40
-              text-xs text-slate-300 placeholder-slate-600
+            className="w-full pl-8 pr-8 py-2 rounded-lg bg-slate-50 border border-slate-200
+              text-xs text-slate-700 placeholder-slate-600
               focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors"
           />
           <button
             onClick={() => setShowFilters(v => !v)}
             className={cn(
               "absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded transition-colors",
-              showFilters ? "text-indigo-400" : "text-slate-600 hover:text-slate-400"
+              showFilters ? "text-indigo-600" : "text-slate-600 hover:text-slate-500"
             )}
           >
             <Filter className="w-3.5 h-3.5" />
@@ -603,8 +603,8 @@ export function TaskBucket({
                   className={cn(
                     "text-[10px] font-semibold px-2 py-0.5 rounded-md border transition-all capitalize",
                     filterSt === s
-                      ? "bg-slate-700 text-slate-200 border-slate-500"
-                      : "bg-transparent text-slate-600 border-slate-700/40 hover:border-slate-600"
+                      ? "bg-slate-700 text-slate-800 border-slate-500"
+                      : "bg-transparent text-slate-600 border-slate-200 hover:border-slate-600"
                   )}
                 >
                   {s.replace("_", " ")}

@@ -12,7 +12,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard, Kanban, Network, FolderOpen, Settings,
-  Zap, Cpu, DollarSign, Brain, Command,
+  Zap, Cpu, DollarSign, Brain, Command, History, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHiveStore } from "@/lib/store";
@@ -34,6 +34,8 @@ const NAV_ITEMS = [
   { href: "/backlog",       label: "Backlog",       icon: Kanban,          tooltip: "Kanban Task Board" },
   { href: "/orchestration", label: "Orchestration", icon: Network,         tooltip: "Live Agent Graph" },
   { href: "/workspace",     label: "Workspace",     icon: FolderOpen,      tooltip: "File Explorer & IDE" },
+  { href: "/review",        label: "Review",        icon: ShieldCheck,     tooltip: "Quality Gate & Design Specs" },
+  { href: "/history",       label: "History",       icon: History,         tooltip: "All Previous Sessions" },
   { href: "/settings",      label: "Settings",      icon: Settings,        tooltip: "LLM Providers & Keys" },
 ] as const;
 
@@ -42,7 +44,7 @@ function GlobalStatusBar() {
   const {
     hiveId, isRunning, sessionStatus,
     hiveAgents, charCount, provider, budgetLimit,
-    wsEvents, bucketTasks,
+    wsEvents, bucketTasks, reviewLogs,
   } = useHiveStore();
 
   const tokenEstimate   = Math.round(charCount / 4);
@@ -59,17 +61,17 @@ function GlobalStatusBar() {
       <div className="flex items-center gap-2">
         <div className={cn(
           "w-1.5 h-1.5 rounded-full",
-          isRunning ? "bg-indigo-400 animate-pulse" : "bg-slate-600"
+          isRunning ? "bg-indigo-500 animate-pulse" : "bg-slate-300"
         )} />
-        <span className="font-semibold text-slate-400">
+        <span className="font-semibold text-slate-600">
           {isRunning ? "Hive Active" : sessionStatus === "completed" ? "Completed" : "System Ready"}
         </span>
         {hiveId && (
-          <span className="font-mono text-slate-600 text-[10px]">#{hiveId.slice(0, 8)}</span>
+          <span className="font-mono text-slate-500 text-[10px]">#{hiveId.slice(0, 8)}</span>
         )}
       </div>
 
-      <div className="w-px h-4 bg-slate-800/80" />
+      <div className="w-px h-4 bg-slate-200" />
 
       {/* Agent stats */}
       {hiveAgents.length > 0 && (
@@ -77,13 +79,13 @@ function GlobalStatusBar() {
           <div className="flex items-center gap-1.5 text-slate-500">
             <Cpu className="w-3 h-3" />
             <span>
-              <span className="text-slate-300 font-semibold">{activeAgents}</span>
+              <span className="text-slate-800 font-semibold">{activeAgents}</span>
               {" active / "}
-              <span className="text-emerald-500 font-semibold">{doneAgents}</span>
+              <span className="text-emerald-600 font-semibold">{doneAgents}</span>
               {" done"}
             </span>
           </div>
-          <div className="w-px h-4 bg-slate-800/80" />
+          <div className="w-px h-4 bg-slate-200" />
         </>
       )}
 
@@ -92,15 +94,15 @@ function GlobalStatusBar() {
         <>
           <div className="flex items-center gap-1.5 text-slate-500">
             <Brain className="w-3 h-3" />
-            <span className="font-mono text-slate-400">{tokenEstimate.toLocaleString()} tok</span>
+            <span className="font-mono text-slate-600">{tokenEstimate.toLocaleString()} tok</span>
           </div>
           <div className="flex items-center gap-1 text-slate-500">
             <DollarSign className="w-3 h-3" />
-            <span className={cn("font-mono font-semibold", overBudget ? "text-red-400" : "text-emerald-400")}>
+            <span className={cn("font-mono font-semibold", overBudget ? "text-red-600" : "text-emerald-600")}>
               ~{costEstimate.toFixed(3)}
             </span>
           </div>
-          <div className="w-px h-4 bg-slate-800/80" />
+          <div className="w-px h-4 bg-slate-200" />
         </>
       )}
 
@@ -112,7 +114,7 @@ function GlobalStatusBar() {
             <motion.span
               animate={{ opacity: [1, 0.5, 1] }}
               transition={{ duration: 1.4, repeat: Infinity }}
-              className="text-indigo-400 font-semibold"
+              className="text-indigo-600 font-semibold"
             >
               {inProgressTasks} running
             </motion.span>
@@ -125,11 +127,22 @@ function GlobalStatusBar() {
 
       {/* Right side */}
       <div className="ml-auto flex items-center gap-3">
+        {reviewLogs.length > 0 && (() => {
+          const approved = reviewLogs.filter(l => l.verdict === "APPROVED").length;
+          const refactor = reviewLogs.filter(l => l.verdict === "REFACTOR_REQUIRED").length;
+          return (
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <ShieldCheck className="w-3 h-3 text-emerald-600" />
+              <span className="text-emerald-600 font-semibold">{approved}✓</span>
+              {refactor > 0 && <span className="text-red-600 font-semibold">{refactor}✗</span>}
+            </div>
+          );
+        })()}
         {wsEvents.length > 0 && (
-          <span className="text-slate-600">{wsEvents.length} events</span>
+          <span className="text-slate-500">{wsEvents.length} events</span>
         )}
-        <span className="text-slate-700 font-mono">AgentHive</span>
-        <span className="text-slate-700 font-mono text-[9px]">v0.5</span>
+        <span className="text-slate-800 font-mono font-semibold tracking-tight">AgentHive</span>
+        <span className="text-slate-400 font-mono text-[9px]">v2</span>
       </div>
     </div>
   );
@@ -144,6 +157,9 @@ function HiveSocketBridge() {
     hiveId, pushWsEvents, updateAgentStatus, upsertAgent,
     addCharCount, updateThought, updateToolCall, pushShellLines,
     addRecentChange, clearSession, setPendingReview,
+    addPreparingSpawn, removePreparingSpawn, triggerManagerPulse,
+    addReviewLog, addDesignSpec,
+    setIsRunning, setSessionStatus,
   } = useHiveStore();
 
   const evBuf = useRef<HiveEvent[]>([]);
@@ -169,13 +185,20 @@ function HiveSocketBridge() {
           }, 0));
 
           for (const ev of buf) {
-            if (ev.event_type === "SPAWN") {
+            if (ev.event_type === "PREPARING_SPAWN") {
+              addPreparingSpawn(ev.agent_id);
+            } else if (ev.event_type === "SPAWN") {
               const d = typeof ev.data === "object" ? ev.data as Record<string, unknown> : {};
+              // Remove from preparing set FIRST so the node renders immediately as real
+              removePreparingSpawn(ev.agent_id);
+              // parent_id: prefer top-level event field (properly set by engine),
+              // fall back to data dict for legacy events
+              const parentId = ev.parent_id || (d.parent_id as string | null) || null;
               upsertAgent({
                 id: ev.agent_id,
                 role: String(d.role || "unknown"),
                 session_id: ev.hive_id || "",
-                parent_id: ev.parent_id || null,
+                parent_id: parentId,
                 status: "thinking",
                 specialized_task: String(d.task_preview || ""),
                 local_context: {},
@@ -187,8 +210,46 @@ function HiveSocketBridge() {
               const d = typeof ev.data === "object" ? ev.data as Record<string, unknown> : {};
               if (d.status) updateAgentStatus(ev.agent_id, d.status as AgentStatus);
               if (d.status === "review_requested") {
-                setPendingReview({ summary: String(d.summary ?? "Ready for review.") });
+                setPendingReview({
+                  summary: String(d.summary ?? "Ready for review."),
+                  hive_id: ev.hive_id || undefined,
+                });
               }
+            } else if (ev.event_type === "BUCKET_UPDATE") {
+              triggerManagerPulse();
+            } else if (ev.event_type === "REVIEW_LOG") {
+              // Code Reviewer verdict — push to store for dashboard display
+              const d = typeof ev.data === "object" ? ev.data as Record<string, unknown> : {};
+              addReviewLog({
+                task_id:            String(d.task_id || ""),
+                task_title:         String(d.task_title || ""),
+                worker_role:        String(d.worker_role || ""),
+                verdict:            (d.verdict as "APPROVED" | "REFACTOR_REQUIRED") ?? "APPROVED",
+                critical_count:     Number(d.critical_count ?? 0),
+                major_count:        Number(d.major_count ?? 0),
+                minor_count:        Number(d.minor_count ?? 0),
+                summary:            String(d.summary || ""),
+                timestamp:          String(d.timestamp || new Date().toISOString()),
+                reviewer_agent_id:  String(d.reviewer_agent_id || ev.agent_id),
+                report_path:        String(d.report_path || ""),
+              });
+            } else if (ev.event_type === "DESIGN_SPEC") {
+              // UI/UX Spec published — push to store for dashboard display
+              const d = typeof ev.data === "object" ? ev.data as Record<string, unknown> : {};
+              addDesignSpec({
+                task_id:       String(d.task_id || ""),
+                task_title:    String(d.task_title || ""),
+                spec_path:     String(d.spec_path || ""),
+                color_primary: String(d.color_primary || ""),
+                font:          String(d.font || ""),
+                summary:       String(d.summary || ""),
+                timestamp:     String(d.timestamp || new Date().toISOString()),
+                agent_id:      String(d.agent_id || ev.agent_id),
+              });
+            } else if (ev.event_type === "FACTORY_DONE") {
+              // Factory finished — mark session as complete immediately
+              setIsRunning(false);
+              setSessionStatus("completed");
             }
           }
         }
@@ -241,6 +302,7 @@ function HiveSocketBridge() {
 }
 
 // ─── Bucket SSE Bridge ────────────────────────────────────────────────────────
+
 function BucketBridge() {
   const { setBucketTasks, setBucketProgress, setIsRunning } = useHiveStore();
 
@@ -308,25 +370,25 @@ export default function HiveLayout({ children }: { children: React.ReactNode }) 
   }, []);
 
   return (
-    <div className="h-screen flex flex-col dashboard-bg text-slate-200 overflow-hidden">
+    <div className="h-screen flex flex-col dashboard-bg text-slate-800 overflow-hidden">
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
         {/* ── Navigation Rail ──────────────────────────────────────────────── */}
-        <nav className="nav-rail w-14 flex flex-col items-center py-4 gap-1 shrink-0 z-40">
+        <nav className="nav-rail w-14 flex flex-col items-center py-4 gap-0.5 shrink-0 z-40">
           {/* Logo */}
-          <div className="mb-5 flex items-center justify-center">
+          <div className="mb-6 flex items-center justify-center">
             <div className="relative">
               <div
-                className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-900/50 cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center cursor-pointer shadow-md shadow-indigo-500/20"
                 onClick={() => router.push("/dashboard")}
               >
                 <Zap className="w-4 h-4 text-white" />
               </div>
               {isRunning && (
                 <motion.div
-                  className="absolute inset-0 rounded-xl border border-indigo-400/60"
-                  animate={{ opacity: [1, 0, 1], scale: [1, 1.25, 1] }}
-                  transition={{ duration: 1.8, repeat: Infinity }}
+                  className="absolute inset-0 rounded-lg border border-indigo-400/50"
+                  animate={{ opacity: [1, 0, 1], scale: [1, 1.2, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
                 />
               )}
             </div>
@@ -342,22 +404,22 @@ export default function HiveLayout({ children }: { children: React.ReactNode }) 
                 onClick={() => router.push(href)}
                 title={tooltip}
                 className={cn(
-                  "relative group w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200",
+                  "relative group w-10 h-10 rounded-md flex items-center justify-center transition-all duration-150",
                   active
-                    ? "bg-indigo-600/20 text-indigo-300"
-                    : "text-slate-600 hover:text-slate-300 hover:bg-slate-800/60"
+                    ? "bg-indigo-50 text-indigo-600"
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                 )}
               >
                 {active && (
                   <motion.div
                     layoutId="nav-active-pill"
-                    className="absolute left-0 w-0.5 h-5 bg-indigo-500 rounded-r-full -ml-2"
+                    className="absolute left-0 w-0.5 h-4 bg-indigo-600 rounded-r-full -ml-2"
                   />
                 )}
-                <Icon className="w-[18px] h-[18px]" />
+                <Icon className="w-[17px] h-[17px]" />
                 {/* Tooltip */}
-                <span className="absolute left-full ml-3 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/50 text-xs font-medium text-slate-200 whitespace-nowrap
-                  opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-xl">
+                <span className="absolute left-full ml-3 px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-xs font-medium text-slate-800 whitespace-nowrap
+                  opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-lg">
                   {tooltip}
                 </span>
               </button>
@@ -369,11 +431,11 @@ export default function HiveLayout({ children }: { children: React.ReactNode }) 
             <button
               onClick={() => setCmdOpen(true)}
               title="Command Palette (Ctrl+K)"
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-600 hover:text-slate-300 hover:bg-slate-800/60 transition-all group relative"
+              className="w-10 h-10 rounded-md flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-all group relative"
             >
-              <Command className="w-[18px] h-[18px]" />
-              <span className="absolute left-full ml-3 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/50 text-xs font-medium text-slate-200 whitespace-nowrap
-                opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-xl">
+              <Command className="w-[17px] h-[17px]" />
+              <span className="absolute left-full ml-3 px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-xs font-medium text-slate-800 whitespace-nowrap
+                opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-lg">
                 Command Palette (Ctrl+K)
               </span>
             </button>

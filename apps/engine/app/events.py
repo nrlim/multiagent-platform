@@ -16,17 +16,25 @@ from app import config
 
 # ─── Event Types ──────────────────────────────────────────────────────────────
 EventType = Literal[
-    "SPAWN",        # New agent spawned
-    "STATUS",       # Agent status changed
-    "THOUGHT",      # LLM reasoning / planning output
-    "TOOL_CALL",    # Agent calling a tool (write_file, execute_command…)
-    "SHELL_OUTPUT", # Raw stdout/stderr line from a subprocess
-    "ARTIFACT",     # Inter-agent artifact published to message bus
-    "FILE_CHANGE",  # File created/updated in workspace
-    "DONE",         # Agent or hive completed
-    "ERROR",        # Agent error
-    "LOG",          # Generic log line
-    "CHAT",         # Humanized dialogue message (translated by dialogue layer)
+    "SPAWN",           # New agent spawned
+    "PREPARING_SPAWN", # Pre-spawn shimmer hint (before LLM decides role)
+    "STATUS",          # Agent status changed
+    "THOUGHT",         # LLM reasoning / planning output
+    "TOOL_CALL",       # Agent calling a tool (write_file, execute_command…)
+    "SHELL_OUTPUT",    # Raw stdout/stderr line from a subprocess
+    "ARTIFACT",        # Inter-agent artifact published to message bus
+    "FILE_CHANGE",     # File created/updated in workspace
+    "DONE",            # Agent or hive completed
+    "ERROR",           # Agent error
+    "LOG",             # Generic log line
+    "CHAT",            # Humanized dialogue message (translated by dialogue layer)
+    "BUCKET_UPDATE",   # Task bucket status change
+    "FACTORY_START",   # Factory loop started
+    "FACTORY_PROGRESS",# Factory progress tick
+    "FACTORY_DONE",    # Factory loop finished
+    # ── Swarm events ──────────────────────────────────────────────────────
+    "HANDOFF",         # Agent-to-agent transfer in the swarm (from_role → to_role)
+    "SWARM_DONE",      # Swarm task terminated via terminate_and_report
 ]
 
 REDIS_CHANNEL = "agenthive:events"
@@ -164,7 +172,11 @@ def emit_event(
         event_bus._history.setdefault(hive_id, []).append(ev)
 
 
-_CHAT_EVENT_TYPES = {"SPAWN", "STATUS", "THOUGHT", "TOOL_CALL", "FILE_CHANGE", "ARTIFACT", "DONE", "ERROR"}
+_CHAT_EVENT_TYPES = {
+    "SPAWN", "STATUS", "THOUGHT", "TOOL_CALL", "FILE_CHANGE",
+    "ARTIFACT", "DONE", "ERROR",
+    "HANDOFF", "SWARM_DONE",
+}
 
 
 def _maybe_emit_chat(

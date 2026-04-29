@@ -15,7 +15,7 @@ def create_agent(
     Factory function to instantiate the correct agent for a given provider.
 
     Args:
-        provider: One of 'google', 'openai', 'anthropic'. Defaults to env PROVIDER.
+        provider: One of 'google', 'openai', 'anthropic', 'deepseek'. Defaults to env PROVIDER.
         model: Optional model override. Defaults to provider's default model.
         log_emitter: Callback for log events. Signature: (level: str, message: str) -> None
 
@@ -39,8 +39,12 @@ def create_agent(
         from app.agents.anthropic_agent import AnthropicAgent
         return AnthropicAgent(model=model, log_emitter=log_emitter)
 
+    elif resolved_provider == "deepseek":
+        from app.agents.deepseek_agent import DeepSeekAgent
+        return DeepSeekAgent(model=model, log_emitter=log_emitter)
+
     else:
-        supported = ["google", "openai", "anthropic"]
+        supported = ["google", "openai", "anthropic", "deepseek"]
         raise ValueError(
             f"Unsupported provider '{resolved_provider}'. "
             f"Must be one of: {supported}"
@@ -67,5 +71,11 @@ def get_available_providers() -> list[dict]:
             "label": "Anthropic Claude",
             "configured": bool(config.ANTHROPIC_API_KEY),
             "defaultModel": config.ANTHROPIC_MODEL,
+        },
+        {
+            "id": "deepseek",
+            "label": "DeepSeek",
+            "configured": bool(config.DEEPSEEK_API_KEY),
+            "defaultModel": config.DEEPSEEK_MODEL,
         },
     ]

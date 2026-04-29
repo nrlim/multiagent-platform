@@ -9,16 +9,16 @@ import type { FileNode } from "@/lib/engine-client";
 // ─── Extension → colour ────────────────────────────────────────────────────
 const EXT_COLORS: Record<string, string> = {
   ts:   "text-blue-400",   tsx:  "text-blue-400",  js:   "text-yellow-400",
-  jsx:  "text-yellow-400", py:   "text-emerald-400",rs:   "text-orange-400",
-  go:   "text-cyan-400",   json: "text-amber-400",  yaml: "text-amber-400",
-  yml:  "text-amber-400",  md:   "text-slate-300",  css:  "text-pink-400",
+  jsx:  "text-yellow-400", py:   "text-emerald-600",rs:   "text-orange-400",
+  go:   "text-cyan-400",   json: "text-amber-600",  yaml: "text-amber-600",
+  yml:  "text-amber-600",  md:   "text-slate-700",  css:  "text-pink-400",
   html: "text-orange-400", sql:  "text-violet-400", sh:   "text-green-400",
-  env:  "text-rose-400",   txt:  "text-slate-400",
+  env:  "text-rose-400",   txt:  "text-slate-500",
 };
 
 function getExtColor(name: string): string {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  return EXT_COLORS[ext] ?? "text-slate-400";
+  return EXT_COLORS[ext] ?? "text-slate-500";
 }
 
 function formatBytes(b?: number | null): string {
@@ -45,9 +45,9 @@ function AnimatedFileEntry({ node, depth = 0, recentPaths, diffOps }: AnimatedFi
   const extColor = getExtColor(node.name);
 
   const opColors: Record<DiffOp, string> = {
-    created:  "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
-    modified: "text-amber-400   bg-amber-500/10   border-amber-500/20",
-    deleted:  "text-red-400     bg-red-500/10     border-red-500/20",
+    created:  "text-emerald-600 bg-emerald-50 border-emerald-200",
+    modified: "text-amber-600   bg-amber-500/10   border-amber-500/20",
+    deleted:  "text-red-600     bg-red-500/10     border-red-500/20",
   };
   const OpIcon: Record<DiffOp, React.ElementType> = {
     created:  FolderPlus,
@@ -66,8 +66,8 @@ function AnimatedFileEntry({ node, depth = 0, recentPaths, diffOps }: AnimatedFi
       <div
         className={cn(
           "group flex items-center gap-2 px-3 py-1.5 rounded-xl cursor-pointer transition-all duration-200 text-base",
-          "hover:bg-slate-800/60 hover:shadow-md",
-          isRecent && "bg-slate-800/40 ring-1 ring-white/5",
+          "hover:bg-slate-100 hover:shadow-md",
+          isRecent && "bg-slate-100/40 ring-1 ring-white/5",
           op && `border border-dashed ${opColors[op]}`,
         )}
         style={{ paddingLeft: `${depth * 18 + 12}px` }}
@@ -75,15 +75,15 @@ function AnimatedFileEntry({ node, depth = 0, recentPaths, diffOps }: AnimatedFi
       >
         {isDir ? (
           expanded
-            ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0 group-hover:text-slate-200 transition-colors" />
-            : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0 group-hover:text-slate-200 transition-colors" />
+            ? <ChevronDown className="w-4 h-4 text-slate-500 shrink-0 group-hover:text-slate-800 transition-colors" />
+            : <ChevronRight className="w-4 h-4 text-slate-500 shrink-0 group-hover:text-slate-800 transition-colors" />
         ) : (
           <File className={cn("w-4 h-4 shrink-0 opacity-80", extColor)} />
         )}
 
         <span className={cn(
           "truncate flex-1 tracking-wide",
-          isDir ? "text-slate-200 font-semibold" : `${extColor} font-medium`,
+          isDir ? "text-slate-800 font-semibold" : `${extColor} font-medium`,
           op === "deleted" && "line-through opacity-50",
         )}>
           {node.name}
@@ -117,7 +117,7 @@ function AnimatedFileEntry({ node, depth = 0, recentPaths, diffOps }: AnimatedFi
           >
             {/* Indent Guide Line */}
             <div 
-              className="absolute left-0 top-0 bottom-0 border-l border-slate-700/50 transition-opacity opacity-0 group-hover:opacity-100" 
+              className="absolute left-0 top-0 bottom-0 border-l border-slate-200 transition-opacity opacity-0 group-hover:opacity-100" 
               style={{ left: `${depth * 18 + 19}px` }} 
             />
             {node.children.map((child) => (
@@ -163,7 +163,7 @@ export function AnimatedFileTree({ nodes, recentChanges = [], className }: Anima
   }
 
   return (
-    <div className={cn("space-y-1 p-3 bg-slate-950/40 rounded-2xl border border-white/5 shadow-inner", className)}>
+    <div className={cn("space-y-1 p-3 bg-slate-50/40 rounded-2xl border border-slate-200 shadow-inner", className)}>
       <AnimatePresence>
         {nodes.map((node) => (
           <AnimatedFileEntry

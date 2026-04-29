@@ -10,16 +10,26 @@ import { useEffect, useRef, useCallback, useState } from "react";
 // ─── Canonical event types (mirrors Python EventType) ─────────────────────────
 export type EventType =
   | "SPAWN"
+  | "PREPARING_SPAWN"
   | "STATUS"
   | "THOUGHT"
   | "TOOL_CALL"
   | "SHELL_OUTPUT"
   | "ARTIFACT"
   | "FILE_CHANGE"
+  | "REVIEW_LOG"
+  | "DESIGN_SPEC"
   | "DONE"
   | "ERROR"
   | "LOG"
   | "CHAT"
+  | "BUCKET_UPDATE"
+  | "FACTORY_START"
+  | "FACTORY_PROGRESS"
+  | "FACTORY_DONE"
+  // Swarm events
+  | "HANDOFF"
+  | "SWARM_DONE"
   | "keepalive"
   | "pong";
 
@@ -45,6 +55,8 @@ interface UseHiveSocketOptions {
   onShellOutput?: (event: HiveEvent) => void;
   onFileChange?: (event: HiveEvent) => void;
   onArtifact?: (event: HiveEvent) => void;
+  onReviewLog?: (event: HiveEvent) => void;
+  onDesignSpec?: (event: HiveEvent) => void;
   onDone?: (event: HiveEvent) => void;
   onError?: (event: HiveEvent) => void;
   onClear?: () => void;
@@ -78,6 +90,8 @@ export function useHiveSocket(options: UseHiveSocketOptions) {
       case "SHELL_OUTPUT":c.onShellOutput?.(event);break;
       case "FILE_CHANGE": c.onFileChange?.(event); break;
       case "ARTIFACT":    c.onArtifact?.(event);   break;
+      case "REVIEW_LOG":  c.onReviewLog?.(event);  break;
+      case "DESIGN_SPEC": c.onDesignSpec?.(event); break;
       case "DONE":        c.onDone?.(event);       break;
       case "ERROR":       c.onError?.(event);      break;
     }

@@ -1,6 +1,34 @@
 // Engine API client — proxied through Next.js API routes
 const ENGINE_BASE = "/api/engine";
 
+// ─── Phase 5: System Settings ─────────────────────────────────────────────────
+export interface SystemSettings {
+  provider: string;
+  model: string;
+  google_key_set: boolean;
+  openai_key_set: boolean;
+  anthropic_key_set: boolean;
+  deepseek_key_set: boolean;
+  budget_limit: number;
+  run_qa: boolean;
+  require_review: boolean;
+}
+
+export async function fetchSystemSettings(): Promise<SystemSettings> {
+  const res = await fetch(`${ENGINE_BASE}/settings`);
+  if (!res.ok) throw new Error("Failed to fetch settings");
+  return res.json();
+}
+
+export async function updateSystemSettings(data: Partial<SystemSettings & { google_key?: string, openai_key?: string, anthropic_key?: string, deepseek_key?: string }>): Promise<void> {
+  const res = await fetch(`${ENGINE_BASE}/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update settings");
+}
+
 // ─── Shared Types ─────────────────────────────────────────────────────────────
 export interface ExecuteRequest {
   prompt: string;
@@ -189,6 +217,25 @@ export async function getHiveAgents(hiveId: string): Promise<AgentNode[]> {
   return data.agents ?? [];
 }
 
+export interface HiveDetail {
+  id: string;
+  prompt: string;
+  provider: string;
+  model: string;
+  status: string;
+  budget_limit: number;
+  created_at: string;
+  completed_at?: string | null;
+  agents: AgentNode[];
+  log_count: number;
+}
+
+export async function getHiveDetail(hiveId: string): Promise<HiveDetail | null> {
+  const res = await fetch(`${ENGINE_BASE}/hive/${hiveId}`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 export async function listSessions(): Promise<Session[]> {
   const res = await fetch(`${ENGINE_BASE}/sessions`);
@@ -327,6 +374,8 @@ export interface BucketStartRequest {
   budget_limit?: number;
   run_qa?: boolean;
   stop_on_failure?: boolean;
+  /** Pass the current hiveId to reuse the same orchestration session */
+  hive_id?: string | null;
 }
 
 export interface BucketStartResponse {
@@ -445,3 +494,172 @@ export async function getFactoryStatus(): Promise<{
   return res.json();
 }
 
+// ── Business Analyst (Analyze & Plan) ────────────────────────────────────────
+
+export interface AnalyzeRequest {
+  requirement: string;
+  provider?: string;
+  model?: string;
+  /** Reuse existing hive session so graph stays alive */
+  hive_id?: string | null;
+}
+
+export interface AnalyzeResponse {
+  hive_id: string;
+  status: "analyzing";
+  message: string;
+  tasks_queued: number;
+}
+
+/**
+ * Trigger the Business Analyst agent to decompose a requirement into tasks.
+ * Tasks are created asynchronously and appear on the Kanban board in real-time.
+ * Returns immediately with the hive_id so the dashboard can subscribe to live events.
+ */
+export async function analyzeRequirement(req: AnalyzeRequest): Promise<AnalyzeResponse> {
+  const res = await fetch(`${ENGINE_BASE}/hive/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(`analyzeRequirement failed: ${res.statusText}`);
+  return res.json();
+}
+
+// ── Workspace File Metadata ───────────────────────────────────────────────────
+
+export interface WorkspaceFileMeta {
+  path: string;
+  size_bytes: number;
+  mime_type: string;
+  is_directory: boolean;
+  agent_id: string | null;
+  updated_at: string | null;
+}
+
+export interface HiveFilesResponse {
+  hive_id: string;
+  /** "db" = from PostgreSQL, "disk" = live scan, "none" = no workspace found */
+  source: "db" | "disk" | "none";
+  files: WorkspaceFileMeta[];
+  count: number;
+}
+
+/**
+ * Fetch workspace file metadata for a hive session.
+ * Returns DB-persisted records when available, falls back to a live disk scan.
+ */
+export async function getHiveFiles(hiveId: string): Promise<HiveFilesResponse> {
+  const res = await fetch(`${ENGINE_BASE}/hive/${hiveId}/files`);
+  if (!res.ok) return { hive_id: hiveId, source: "none", files: [], count: 0 };
+  return res.json();
+}
+
+// ── Workspace Snapshot (JSON blob) ────────────────────────────────────────────
+
+export interface WorkspaceSnapshot {
+  hive_id: string;
+  /** Full FileNode[] tree, serialised as a JSON string from the DB */
+  files_json: string;
+  file_count: number;
+  updated_at: string | null;
+  source: "db" | "none";
+}
+
+/**
+ * Fetch the workspace snapshot for a given session.
+ * The engine returns the full FileNode[] tree as a JSON string.
+ */
+export async function getWorkspaceSnapshot(hiveId: string): Promise<WorkspaceSnapshot> {
+  const res = await fetch(`${ENGINE_BASE}/workspace/${hiveId}/snapshot`);
+  if (!res.ok) return { hive_id: hiveId, files_json: "[]", file_count: 0, updated_at: null, source: "none" };
+  return res.json();
+}
+
+/**
+ * Persist the workspace file tree snapshot for a given session.
+ * Pass the full FileNode[] as a JSON string.
+ */
+export async function saveWorkspaceSnapshot(hiveId: string, tree: FileNode[]): Promise<void> {
+  const res = await fetch(`${ENGINE_BASE}/workspace/${hiveId}/snapshot`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ files_json: JSON.stringify(tree) }),
+  });
+  if (!res.ok) throw new Error(`saveWorkspaceSnapshot failed: ${res.statusText}`);
+}
+
+/**
+ * Parse a files_json string from the DB into a FileNode[] array.
+ * Always safe — returns [] on any parse error.
+ */
+export function parseFilesJson(raw: string): FileNode[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PHASE 4.4 — Review Logs & Design Specs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type ReviewVerdict = "APPROVED" | "REFACTOR_REQUIRED";
+
+export interface ReviewLog {
+  task_id: string;
+  task_title: string;
+  worker_role: string;
+  verdict: ReviewVerdict;
+  critical_count: number;
+  major_count: number;
+  minor_count: number;
+  summary: string;
+  timestamp: string;
+  reviewer_agent_id: string;
+  report_path: string;
+  hive_id?: string;
+}
+
+export interface DesignSpec {
+  task_id: string;
+  task_title: string;
+  spec_path: string;
+  color_primary: string;
+  font: string;
+  summary: string;
+  timestamp: string;
+  agent_id: string;
+  hive_id?: string;
+}
+
+export async function getHiveReviewLogs(hiveId: string): Promise<ReviewLog[]> {
+  const res = await fetch(`${ENGINE_BASE}/hive/${hiveId}/review-logs`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.logs ?? [];
+}
+
+export async function getHiveDesignSpecs(hiveId: string): Promise<DesignSpec[]> {
+  const res = await fetch(`${ENGINE_BASE}/hive/${hiveId}/design-specs`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.specs ?? [];
+}
+
+export async function getAllReviewLogs(): Promise<ReviewLog[]> {
+  const res = await fetch(`${ENGINE_BASE}/review-logs`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.logs ?? [];
+}
+
+export async function getAllDesignSpecs(): Promise<DesignSpec[]> {
+  const res = await fetch(`${ENGINE_BASE}/design-specs`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.specs ?? [];
+}

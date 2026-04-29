@@ -151,3 +151,36 @@ model TaskBucket {
   @@index([parent_task_id])
   @@map("task_bucket")
 }
+
+// ── Workspace Snapshot (one JSON blob per session) ────────────────────────────
+// Stores the entire file tree as a single JSON document per hive session.
+// files_json is a serialized FileNode[] tree. Simple, portable, queryable.
+model SessionWorkspace {
+  id         String   @id @default(uuid())
+  hive_id    String   @unique   // one snapshot per session
+  files_json String   @default("[]")  // JSON: FileNode[]
+  file_count Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([hive_id])
+  @@map("session_workspaces")
+}
+
+// ── System Settings (Platform Config) ──────────────────────────────────────────
+// Global configuration for the platform (provider, api keys, guardrails)
+model SystemSettings {
+  id               String   @id @default("global") // Single row pattern
+  provider         String   @default("google")
+  model            String   @default("")
+  google_key       String?
+  openai_key       String?
+  anthropic_key    String?
+  deepseek_key     String?
+  budget_limit     Float    @default(2.0)
+  run_qa           Boolean  @default(true)
+  require_review   Boolean  @default(false)
+  updated_at       DateTime @updatedAt @default(now())
+
+  @@map("system_settings")
+}

@@ -25,15 +25,18 @@ DEFAULT_PROVIDER: str = os.getenv("PROVIDER", "google")
 GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
 
 GOOGLE_MODEL: str = os.getenv("GOOGLE_MODEL", "gemini-2.0-flash")
 OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
 ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 DEFAULT_MODELS: dict[str, str] = {
     "google": GOOGLE_MODEL,
     "openai": OPENAI_MODEL,
     "anthropic": ANTHROPIC_MODEL,
+    "deepseek": DEEPSEEK_MODEL,
 }
 
 # ─── Phase 3: Redis & Database ────────────────────────────────────────────────

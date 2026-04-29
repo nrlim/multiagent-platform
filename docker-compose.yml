@@ -16,6 +16,16 @@ services:
       timeout: 3s
       retries: 5
 
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: agenthive-redisinsight
+    ports:
+      - "5540:5540"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     container_name: agenthive-postgres

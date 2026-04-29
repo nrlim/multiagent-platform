@@ -34,12 +34,12 @@ const DEFAULT_ROLE = { icon: User, color: "from-slate-500 to-slate-600", label: 
 
 // ─── Status Config ────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<AgentStatus, { icon: React.ElementType; color: string; label: string; animate?: boolean }> = {
-  idle:      { icon: Clock,        color: "text-slate-400",   label: "Idle" },
+  idle:      { icon: Clock,        color: "text-slate-500",   label: "Idle" },
   thinking:  { icon: Loader2,      color: "text-violet-400",  label: "Thinking...", animate: true },
-  working:   { icon: Zap,         color: "text-amber-400",   label: "Working",    animate: true },
+  working:   { icon: Zap,         color: "text-amber-600",   label: "Working",    animate: true },
   fixing:    { icon: Zap,         color: "text-orange-400",  label: "Fixing",     animate: true },
-  completed: { icon: CheckCircle2, color: "text-emerald-400", label: "Done" },
-  error:     { icon: XCircle,      color: "text-red-400",     label: "Error" },
+  completed: { icon: CheckCircle2, color: "text-emerald-600", label: "Done" },
+  error:     { icon: XCircle,      color: "text-red-600",     label: "Error" },
 };
 
 // ─── Single Agent Card ────────────────────────────────────────────────────────
@@ -53,18 +53,18 @@ function AgentCard({ node, depth = 0 }: { node: AgentNode; depth?: number }) {
     <div
       className={cn(
         "relative flex flex-col gap-2",
-        depth > 0 && "pl-6 border-l border-dashed border-slate-700/70"
+        depth > 0 && "pl-6 border-l border-dashed border-slate-200/70"
       )}
     >
       <div
         className={cn(
           "group flex items-start gap-3 p-3 rounded-xl border transition-all duration-300",
-          "bg-slate-900/60 hover:bg-slate-800/60",
+          "bg-slate-50 hover:bg-slate-100",
           node.status === "working"   && "border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.15)]",
           node.status === "thinking"  && "border-violet-500/40 shadow-[0_0_12px_rgba(139,92,246,0.15)]",
           node.status === "completed" && "border-emerald-500/30",
           node.status === "error"     && "border-red-500/30",
-          node.status === "idle"      && "border-slate-700/40",
+          node.status === "idle"      && "border-slate-200",
         )}
       >
         {/* Role icon */}
@@ -80,7 +80,7 @@ function AgentCard({ node, depth = 0 }: { node: AgentNode; depth?: number }) {
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
               {role.label}
             </span>
             <span className="text-[10px] font-mono text-slate-600 truncate">
@@ -107,7 +107,7 @@ function AgentCard({ node, depth = 0 }: { node: AgentNode; depth?: number }) {
 
       {/* Connector dot */}
       {depth > 0 && (
-        <div className="absolute left-0 top-4 w-3 h-3 rounded-full border-2 border-slate-700 bg-slate-900 -translate-x-[7px]" />
+        <div className="absolute left-0 top-4 w-3 h-3 rounded-full border-2 border-slate-200 bg-white -translate-x-[7px]" />
       )}
     </div>
   );
@@ -192,19 +192,19 @@ export function AgentTree({ agents, className }: AgentTreeProps) {
         {stats.working > 0 && (
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-xs text-amber-400">{stats.working} active</span>
+            <span className="text-xs text-amber-600">{stats.working} active</span>
           </div>
         )}
         {stats.done > 0 && (
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span className="text-xs text-emerald-400">{stats.done} done</span>
+            <span className="text-xs text-emerald-600">{stats.done} done</span>
           </div>
         )}
         {stats.error > 0 && (
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-red-400" />
-            <span className="text-xs text-red-400">{stats.error} failed</span>
+            <span className="text-xs text-red-600">{stats.error} failed</span>
           </div>
         )}
       </div>

@@ -172,8 +172,177 @@ async def db_get_hive_cost(hive_id: str) -> float:
         return 0.0
 
 
+async def db_get_token_summary(hive_id: str) -> dict:
+    """Return aggregated token stats for a hive session."""
+    db = await _get_db()
+    if not db:
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+    try:
+        result = await db.tokenusage.aggregate(
+            where={"hive_id": hive_id},
+            sum={
+                "prompt_tokens": True,
+                "completion_tokens": True,
+                "total_tokens": True,
+                "cost_usd": True,
+            },
+        )
+        s = result.sum
+        return {
+            "prompt_tokens":     int(s.prompt_tokens or 0),
+            "completion_tokens": int(s.completion_tokens or 0),
+            "total_tokens":      int(s.total_tokens or 0),
+            "cost_usd":          float(s.cost_usd or 0.0),
+        }
+    except Exception as exc:
+        logger.debug(f"[DB] get_token_summary failed: {exc}")
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+
+
+# ─── QA Results ───────────────────────────────────────────────────────────────
+
+async def db_save_qa_result(
+    hive_id: str,
+    agent_id: str,
+    test_file: str,
+    passed: bool,
+    output: str,
+) -> None:
+    """Persist the outcome of a QA agent test run."""
+    db = await _get_db()
+    if not db:
+        return
+    try:
+        await db.qaresult.create(
+            data={
+                "hive_id":   hive_id,
+                "agent_id":  agent_id,
+                "test_file": test_file,
+                "passed":    passed,
+                "output":    output[:8000],  # cap at 8k chars
+            }
+        )
+        logger.info(f"[DB] QA result saved: hive={hive_id[:8]} passed={passed}")
+    except Exception as exc:
+        logger.debug(f"[DB] save_qa_result failed: {exc}")
+
+
+async def db_get_qa_results(hive_id: str) -> list[dict]:
+    """Fetch all QA results for a hive session."""
+    db = await _get_db()
+    if not db:
+        return []
+    try:
+        rows = await db.qaresult.find_many(
+            where={"hive_id": hive_id},
+            order={"created_at": "asc"},
+        )
+        return [
+            {
+                "id":         r.id,
+                "hive_id":    r.hive_id,
+                "agent_id":   r.agent_id,
+                "test_file":  r.test_file,
+                "passed":     r.passed,
+                "output":     r.output,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.debug(f"[DB] get_qa_results failed: {exc}")
+        return []
+
+
+# ─── Review Requests ──────────────────────────────────────────────────────────
+
+async def db_save_review_request(
+    hive_id: str,
+    agent_id: str,
+    review_id: str,
+    summary: str,
+) -> None:
+    """Persist a new human-in-the-loop review request (status=pending)."""
+    db = await _get_db()
+    if not db:
+        return
+    try:
+        await db.reviewrequest.create(
+            data={
+                "id":       review_id,
+                "hive_id":  hive_id,
+                "agent_id": agent_id,
+                "status":   "pending",
+                "summary":  summary[:2000],
+            }
+        )
+        logger.info(f"[DB] ReviewRequest created: id={review_id[:8]} hive={hive_id[:8]}")
+    except Exception as exc:
+        logger.debug(f"[DB] save_review_request failed: {exc}")
+
+
+async def db_resolve_review_request(
+    hive_id: str,
+    approved: bool,
+    reviewer_note: str = "",
+) -> None:
+    """Mark the most recent pending ReviewRequest for this hive as resolved."""
+    db = await _get_db()
+    if not db:
+        return
+    try:
+        # Find the latest pending review for this hive
+        row = await db.reviewrequest.find_first(
+            where={"hive_id": hive_id, "status": "pending"},
+            order={"created_at": "desc"},
+        )
+        if not row:
+            return
+        await db.reviewrequest.update(
+            where={"id": row.id},
+            data={
+                "status":        "approved" if approved else "rejected",
+                "resolved_at":   datetime.utcnow(),
+                "reviewer_note": reviewer_note or ("Auto-approved (timeout)" if approved else "Rejected"),
+            },
+        )
+        logger.info(f"[DB] ReviewRequest resolved: id={row.id[:8]} approved={approved}")
+    except Exception as exc:
+        logger.debug(f"[DB] resolve_review_request failed: {exc}")
+
+
+async def db_get_review_requests(hive_id: str) -> list[dict]:
+    """Fetch all review requests for a hive session."""
+    db = await _get_db()
+    if not db:
+        return []
+    try:
+        rows = await db.reviewrequest.find_many(
+            where={"hive_id": hive_id},
+            order={"created_at": "desc"},
+        )
+        return [
+            {
+                "id":            r.id,
+                "hive_id":       r.hive_id,
+                "agent_id":      r.agent_id,
+                "status":        r.status,
+                "summary":       r.summary,
+                "created_at":    r.created_at.isoformat() if r.created_at else None,
+                "resolved_at":   r.resolved_at.isoformat() if r.resolved_at else None,
+                "reviewer_note": r.reviewer_note,
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.debug(f"[DB] get_review_requests failed: {exc}")
+        return []
+
+
+
+
 async def db_list_hives(limit: int = 50) -> list[dict]:
-    """Return recent hive sessions from DB."""
+    """Return recent hive sessions from DB — safe flat dicts only."""
     db = await _get_db()
     if not db:
         return []
@@ -182,23 +351,67 @@ async def db_list_hives(limit: int = 50) -> list[dict]:
             order={"created_at": "desc"},
             take=limit,
         )
-        return [r.dict() for r in rows]
-    except Exception:
+        result = []
+        for r in rows:
+            result.append({
+                "id":           r.id,
+                "prompt":       r.prompt,
+                "provider":     r.provider,
+                "model":        r.model,
+                "status":       r.status,
+                "budget_limit": r.budget_limit,
+                "created_at":   r.created_at.isoformat() if r.created_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                # agents/logs not included at list level — too heavy
+                "agents": [],
+                "logs":   [],
+            })
+        return result
+    except Exception as exc:
+        logger.warning(f"[DB] list_hives failed: {exc}")
         return []
 
 
 async def db_get_hive_detail(hive_id: str) -> dict | None:
-    """Return full hive detail including agents and logs."""
+    """Return full hive detail including agents. Returns None if not found."""
     db = await _get_db()
     if not db:
         return None
     try:
         row = await db.hivesession.find_unique(
             where={"id": hive_id},
-            include={"agents": True, "logs": {"take": 500, "order": {"timestamp": "asc"}}},
+            include={"agents": True},
         )
-        return row.dict() if row else None
-    except Exception:
+        if not row:
+            return None
+        agents = []
+        for a in (row.agents or []):
+            agents.append({
+                "id":               a.id,
+                "role":             a.role,
+                "status":           a.status,
+                "session_id":       a.hive_id,
+                "parent_id":        a.parent_id,
+                "specialized_task": a.task,
+                "children":         [],
+                "created_at":       a.created_at.isoformat() if a.created_at else None,
+                "completed_at":     None,
+                "local_context":    {},
+            })
+        return {
+            "id":           row.id,
+            "prompt":       row.prompt,
+            "provider":     row.provider,
+            "model":        row.model,
+            "status":       row.status,
+            "budget_limit": row.budget_limit,
+            "created_at":   row.created_at.isoformat() if row.created_at else None,
+            "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+            "agents":       agents,
+            "log_count":    0,   # omit logs at detail level too — use SSE stream instead
+        }
+    except Exception as exc:
+        logger.warning(f"[DB] get_hive_detail failed: {exc}")
         return None
 
 
@@ -211,6 +424,83 @@ async def disconnect_db() -> None:
         except Exception:
             pass
         _db = None
+
+
+async def db_save_workspace_file(
+    hive_id: str,
+    agent_id: str,
+    path: str,
+    size_bytes: int = 0,
+    mime_type: str = "text/plain",
+    is_directory: bool = False,
+) -> None:
+    """Upsert a workspace file metadata record (create or update size/mime)."""
+    db = await _get_db()
+    if not db:
+        return
+    try:
+        await db.workspacefile.upsert(
+            where={"hive_id_path": {"hive_id": hive_id, "path": path}},  # type: ignore
+            data={
+                "create": {
+                    "hive_id":      hive_id,
+                    "agent_id":     agent_id,
+                    "path":         path,
+                    "size_bytes":   size_bytes,
+                    "mime_type":    mime_type,
+                    "is_directory": is_directory,
+                    "created_at":   datetime.utcnow(),
+                },
+                "update": {
+                    "size_bytes": size_bytes,
+                    "mime_type":  mime_type,
+                    "agent_id":   agent_id,
+                },
+            },
+        )
+    except Exception as exc:
+        # Fallback: try plain create (upsert may fail if no unique index on hive_id+path)
+        try:
+            await db.workspacefile.create(data={
+                "hive_id":      hive_id,
+                "agent_id":     agent_id,
+                "path":         path,
+                "size_bytes":   size_bytes,
+                "mime_type":    mime_type,
+                "is_directory": is_directory,
+                "created_at":   datetime.utcnow(),
+            })
+        except Exception:
+            pass
+        logger.debug(f"[DB] save_workspace_file upsert fallback: {exc}")
+
+
+async def db_list_workspace_files(hive_id: str) -> list[dict]:
+    """Return all workspace file metadata records for a given hive session."""
+    db = await _get_db()
+    if not db:
+        return []
+    try:
+        rows = await db.workspacefile.find_many(
+            where={"hive_id": hive_id},
+            order={"path": "asc"},
+        )
+        return [
+            {
+                "path":         r.path,
+                "size_bytes":   r.size_bytes,
+                "mime_type":    r.mime_type,
+                "is_directory": r.is_directory,
+                "agent_id":     r.agent_id,
+                "updated_at":   r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.debug(f"[DB] list_workspace_files failed: {exc}")
+        return []
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -406,3 +696,148 @@ async def db_get_bucket_progress() -> dict:
     except Exception as exc:
         logger.debug(f"[DB] get_bucket_progress failed: {exc}")
         return {"pending": 0, "in_progress": 0, "completed": 0, "failed": 0, "total": 0}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  System Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def db_get_system_settings() -> dict:
+    """Get the global platform settings."""
+    db = await _get_db()
+    default_settings = {
+        "provider": "google",
+        "model": "",
+        "google_key": "",
+        "openai_key": "",
+        "anthropic_key": "",
+        "deepseek_key": "",
+        "budget_limit": 2.0,
+        "run_qa": True,
+        "require_review": False
+    }
+    if not db:
+        return default_settings
+    try:
+        row = await db.systemsettings.find_unique(where={"id": "global"})
+        if not row:
+            return default_settings
+        return {
+            "provider": row.provider,
+            "model": row.model,
+            "google_key": row.google_key or "",
+            "openai_key": row.openai_key or "",
+            "anthropic_key": row.anthropic_key or "",
+            "deepseek_key": row.deepseek_key or "",
+            "budget_limit": row.budget_limit,
+            "run_qa": row.run_qa,
+            "require_review": row.require_review
+        }
+    except Exception as exc:
+        logger.debug(f"[DB] get_system_settings failed: {exc}")
+        return default_settings
+
+
+async def db_upsert_system_settings(data: dict) -> dict:
+    """Upsert global platform settings."""
+    db = await _get_db()
+    if not db:
+        return data
+    try:
+        update_data = {}
+        for k in ["provider", "model", "google_key", "openai_key", "anthropic_key", "deepseek_key", "budget_limit", "run_qa", "require_review"]:
+            if k in data:
+                update_data[k] = data[k]
+        
+        row = await db.systemsettings.upsert(
+            where={"id": "global"},
+            data={
+                "create": {
+                    "id": "global",
+                    "provider": data.get("provider", "google"),
+                    "model": data.get("model", ""),
+                    "google_key": data.get("google_key", ""),
+                    "openai_key": data.get("openai_key", ""),
+                    "anthropic_key": data.get("anthropic_key", ""),
+                    "deepseek_key": data.get("deepseek_key", ""),
+                    "budget_limit": data.get("budget_limit", 2.0),
+                    "run_qa": data.get("run_qa", True),
+                    "require_review": data.get("require_review", False),
+                },
+                "update": update_data
+            }
+        )
+        return {
+            "provider": row.provider,
+            "model": row.model,
+            "google_key": row.google_key or "",
+            "openai_key": row.openai_key or "",
+            "anthropic_key": row.anthropic_key or "",
+            "deepseek_key": row.deepseek_key or "",
+            "budget_limit": row.budget_limit,
+            "run_qa": row.run_qa,
+            "require_review": row.require_review
+        }
+    except Exception as exc:
+        logger.debug(f"[DB] upsert_system_settings failed: {exc}")
+        return data
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Session Workspace Snapshot (JSON blob per session)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def db_get_session_workspace(hive_id: str) -> dict | None:
+    """
+    Fetch the workspace snapshot for a session.
+    Returns dict with files_json (str) and file_count (int), or None if not found.
+    """
+    db = await _get_db()
+    if not db:
+        return None
+    try:
+        row = await db.sessionworkspace.find_unique(where={"hive_id": hive_id})
+        if not row:
+            return None
+        return {
+            "hive_id": row.hive_id,
+            "files_json": row.files_json,
+            "file_count": row.file_count,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+    except Exception as exc:
+        logger.debug(f"[DB] get_session_workspace failed: {exc}")
+        return None
+
+
+async def db_upsert_session_workspace(hive_id: str, files_json: str, file_count: int = 0) -> dict:
+    """
+    Upsert the entire workspace file tree (as JSON string) for a session.
+    One row per session — clean, simple, and immediately queryable from the dashboard.
+    """
+    db = await _get_db()
+    if not db:
+        return {"hive_id": hive_id, "files_json": files_json, "file_count": file_count}
+    try:
+        row = await db.sessionworkspace.upsert(
+            where={"hive_id": hive_id},
+            data={
+                "create": {
+                    "hive_id": hive_id,
+                    "files_json": files_json,
+                    "file_count": file_count,
+                },
+                "update": {
+                    "files_json": files_json,
+                    "file_count": file_count,
+                }
+            }
+        )
+        return {
+            "hive_id": row.hive_id,
+            "files_json": row.files_json,
+            "file_count": row.file_count,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+    except Exception as exc:
+        logger.debug(f"[DB] upsert_session_workspace failed: {exc}")
+        return {"hive_id": hive_id, "files_json": files_json, "file_count": file_count}

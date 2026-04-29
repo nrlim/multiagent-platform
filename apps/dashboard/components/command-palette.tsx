@@ -130,7 +130,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
             className="glass-panel rounded-2xl w-full max-w-xl mx-4 shadow-2xl shadow-black/60 overflow-hidden"
           >
             {/* Search input */}
-            <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/5">
+            <div className="flex items-center gap-3 px-4 py-3.5 border-b border-slate-200">
               <Search className="w-4 h-4 text-slate-500 shrink-0" />
               <input
                 ref={inputRef}
@@ -138,10 +138,10 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
                 onChange={(e) => { setQuery(e.target.value); setCursor(0); }}
                 onKeyDown={handleKey}
                 placeholder="Search commands, sections, tasks..."
-                className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 focus:outline-none"
+                className="flex-1 bg-transparent text-sm text-slate-800 placeholder-slate-600 focus:outline-none"
               />
               <div className="flex items-center gap-1 shrink-0">
-                <kbd className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700/50">ESC</kbd>
+                <kbd className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">ESC</kbd>
               </div>
             </div>
 
@@ -173,24 +173,24 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
                             onMouseEnter={() => setCursor(globalIdx)}
                             className={cn(
                               "w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors",
-                              isActive ? "bg-indigo-600/20" : "hover:bg-slate-800/50"
+                              isActive ? "bg-indigo-50" : "hover:bg-slate-100"
                             )}
                           >
                             <div className={cn(
                               "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors",
-                              isActive ? "bg-indigo-600/30 text-indigo-300" : "bg-slate-800 text-slate-500"
+                              isActive ? "bg-indigo-600/30 text-indigo-700" : "bg-slate-100 text-slate-500"
                             )}>
                               <Icon className="w-3.5 h-3.5" />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className={cn("text-sm font-medium truncate", isActive ? "text-slate-100" : "text-slate-300")}>
+                              <p className={cn("text-sm font-medium truncate", isActive ? "text-slate-900" : "text-slate-700")}>
                                 {cmd.label}
                               </p>
                               {cmd.description && (
                                 <p className="text-[10px] text-slate-600 truncate">{cmd.description}</p>
                               )}
                             </div>
-                            {isActive && <ArrowRight className="w-4 h-4 text-indigo-400 shrink-0" />}
+                            {isActive && <ArrowRight className="w-4 h-4 text-indigo-600 shrink-0" />}
                           </button>
                         );
                       })}
@@ -201,13 +201,13 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
             </div>
 
             {/* Footer */}
-            <div className="flex items-center gap-3 px-4 py-2.5 border-t border-white/5 bg-slate-900/40">
+            <div className="flex items-center gap-3 px-4 py-2.5 border-t border-slate-200 bg-white">
               <div className="flex items-center gap-1 text-[10px] text-slate-600">
-                <kbd className="font-mono px-1 py-0.5 rounded bg-slate-800 border border-slate-700/50">↑↓</kbd>
+                <kbd className="font-mono px-1 py-0.5 rounded bg-slate-100 border border-slate-200">↑↓</kbd>
                 Navigate
               </div>
               <div className="flex items-center gap-1 text-[10px] text-slate-600">
-                <kbd className="font-mono px-1 py-0.5 rounded bg-slate-800 border border-slate-700/50">↵</kbd>
+                <kbd className="font-mono px-1 py-0.5 rounded bg-slate-100 border border-slate-200">↵</kbd>
                 Select
               </div>
               <div className="ml-auto flex items-center gap-1 text-[10px] text-slate-600">

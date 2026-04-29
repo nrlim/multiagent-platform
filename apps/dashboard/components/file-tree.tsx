@@ -60,7 +60,7 @@ function TreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
         className={cn(
           "flex items-center gap-1.5 px-2 py-0.5 rounded cursor-pointer group",
           "hover:bg-slate-700/40 transition-colors",
-          "text-sm text-slate-300"
+          "text-sm text-slate-700"
         )}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
         onClick={() => isDir && setExpanded((x) => !x)}
@@ -81,9 +81,9 @@ function TreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
         {/* Icon */}
         {isDir ? (
           expanded ? (
-            <FolderOpen className="w-4 h-4 text-amber-400 shrink-0" />
+            <FolderOpen className="w-4 h-4 text-amber-600 shrink-0" />
           ) : (
-            <Folder className="w-4 h-4 text-amber-400/70 shrink-0" />
+            <Folder className="w-4 h-4 text-amber-600/70 shrink-0" />
           )
         ) : IconComponent ? (
           <IconComponent className="w-4 h-4 text-blue-400 shrink-0" />

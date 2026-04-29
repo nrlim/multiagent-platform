@@ -141,7 +141,7 @@ export function XtermPanel({ lines, className, title = "shell", clearTrigger = 0
   return (
     <div className={cn("flex flex-col h-full bg-[#020817]", className)}>
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-2 bg-slate-900 border-b border-slate-700/50 shrink-0">
+      <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-slate-200 shrink-0">
         <div className="flex gap-1.5">
           <span className="w-3 h-3 rounded-full bg-red-500/80" />
           <span className="w-3 h-3 rounded-full bg-amber-500/80" />

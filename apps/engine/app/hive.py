@@ -37,6 +37,10 @@ from app.db import (
     db_append_log,
     db_save_token_usage,
     db_get_hive_cost,
+    db_save_workspace_file,
+    db_save_qa_result,
+    db_save_review_request,
+    db_resolve_review_request,
 )
 
 # ─── Budget constants ─────────────────────────────────────────────────────────
@@ -91,13 +95,39 @@ class EventedFileSystemTool(FileSystemTool):
     def write_file(self, relative_path: str, content: str) -> dict:
         result = super().write_file(relative_path, content)
         if result.get("success"):
+            size = result.get("bytes_written", len(content.encode()))
+            # Determine mime type from extension
+            ext = relative_path.rsplit(".", 1)[-1].lower() if "." in relative_path else ""
+            mime = {
+                "py": "text/x-python", "ts": "application/typescript",
+                "tsx": "application/typescript", "js": "application/javascript",
+                "jsx": "application/javascript", "json": "application/json",
+                "html": "text/html", "css": "text/css",
+                "md": "text/markdown", "txt": "text/plain",
+                "sh": "application/x-sh", "yml": "application/x-yaml",
+                "yaml": "application/x-yaml", "toml": "application/toml",
+                "sql": "application/sql",
+            }.get(ext, "text/plain")
             emit_event(
                 "FILE_CHANGE",
                 hive_id=self._hive_id,
                 agent_id=self._agent_id,
-                data={"path": relative_path, "size": result.get("bytes_written", 0), "op": "modified"},
+                data={"path": relative_path, "size": size, "op": "modified"},
                 role=self._role,
             )
+            # Fire-and-forget: persist file metadata to DB
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(db_save_workspace_file(
+                    hive_id=self._hive_id,
+                    agent_id=self._agent_id,
+                    path=relative_path,
+                    size_bytes=size,
+                    mime_type=mime,
+                    is_directory=False,
+                ))
+            except RuntimeError:
+                pass  # no running loop — skip DB save
         return result
 
     def mkdir(self, relative_path: str) -> dict:
@@ -109,6 +139,19 @@ class EventedFileSystemTool(FileSystemTool):
             data={"path": relative_path, "op": "created"},
             role=self._role,
         )
+        # Persist directory metadata too
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(db_save_workspace_file(
+                hive_id=self._hive_id,
+                agent_id=self._agent_id,
+                path=relative_path,
+                size_bytes=0,
+                mime_type="inode/directory",
+                is_directory=True,
+            ))
+        except RuntimeError:
+            pass
         return result
 
 
@@ -320,6 +363,14 @@ Begin.
         emit_event("DONE", hive_id, qa_node.id, {"role": "qa_engineer", "qa_passed": passed}, role="qa_engineer")
         emit_qa("success" if passed else "warning", f"QA Gate: {'✅ PASSED' if passed else '⚠️ FAILED'}")
         await db_upsert_agent(qa_node.id, hive_id, "qa_engineer", "completed", parent_id, qa_node.specialized_task)
+        # ── Persist QA result to database ─────────────────────────────────────
+        await db_save_qa_result(
+            hive_id=hive_id,
+            agent_id=qa_node.id,
+            test_file="tests/test_qa.py",
+            passed=passed,
+            output=terminal.last_output[:8000] if hasattr(terminal, "last_output") else "",
+        )
         return passed
 
     except Exception as exc:
@@ -362,6 +413,14 @@ async def request_human_review(
         },
     )
 
+    # ── Persist review request to database ────────────────────────────────
+    await db_save_review_request(
+        hive_id=hive_id,
+        agent_id="system",
+        review_id=review_id,
+        summary=summary,
+    )
+
     try:
         await asyncio.wait_for(ev.wait(), timeout=float(timeout_seconds))
     except asyncio.TimeoutError:
@@ -370,6 +429,9 @@ async def request_human_review(
     approved = _hive_review_approved.get(hive_id, True)
     _hive_review_events.pop(hive_id, None)
     _hive_review_approved.pop(hive_id, None)
+
+    # ── Update review status in database ──────────────────────────────────
+    await db_resolve_review_request(hive_id=hive_id, approved=approved)
 
     emit("info", f"Review {'approved ✅' if approved else 'rejected ❌'}")
     return approved
@@ -876,6 +938,21 @@ Start now.
         emit_event("DONE", hive_id, "system", {"hive_id": hive_id, "success": False, "failed": failed}, role="manager")
         emit("warning", f"Some Workers failed: {', '.join(failed)}")
         hive.complete(success=False)
+
+    # ── Save final token usage snapshot to DB ─────────────────────────────────
+    total_chars = _hive_char_counters.get(hive_id, 0)
+    if total_chars > 0:
+        prompt_tokens     = int(total_chars / 4 * 0.4)   # rough 40% prompt share
+        completion_tokens = int(total_chars / 4 * 0.6)   # rough 60% completion share
+        rate = _COST_PER_1K.get(hive.provider, 0.003)
+        cost_usd = ((prompt_tokens + completion_tokens) / 1000) * rate
+        await db_save_token_usage(
+            hive_id=hive_id,
+            provider=hive.provider,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=round(cost_usd, 6),
+        )
 
     # Cleanup in-memory counters
     _hive_char_counters.pop(hive_id, None)
