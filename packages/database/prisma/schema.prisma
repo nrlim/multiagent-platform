@@ -126,6 +126,8 @@ model TaskBucket {
   description       String    @default("")
   priority          String    @default("MEDIUM")   // LOW | MEDIUM | HIGH
   status            String    @default("PENDING")  // PENDING | IN_PROGRESS | COMPLETED | FAILED | CANCELLED
+  card_type         String    @default("TASK")     // STORY | TASK | BUG
+  story_id          String?   // parent story this task/bug belongs to (TaskBucket.id)
 
   // Assignment (set when Manager picks the task)
   hive_id           String?
@@ -177,6 +179,7 @@ model SystemSettings {
   openai_key       String?
   anthropic_key    String?
   deepseek_key     String?
+  kimi_key         String?
   budget_limit     Float    @default(2.0)
   run_qa           Boolean  @default(true)
   require_review   Boolean  @default(false)

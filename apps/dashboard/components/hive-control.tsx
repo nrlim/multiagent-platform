@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles, Bot, Brain, Loader2, ChevronDown,
   Network, Users, ShieldCheck, DollarSign, FlaskConical,
-  ArrowUpRight, Info, X, LineChart, Zap, ListChecks, Cpu,
+  ArrowUpRight, Info, X, LineChart, Zap, ListChecks, Cpu, Moon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +45,14 @@ const PROVIDERS = [
     color: "from-sky-500 to-blue-600",
     borderColor: "border-sky-500/40",
     models: ["deepseek-chat", "deepseek-reasoner"],
+  },
+  {
+    id: "kimi",
+    label: "Kimi (Moonshot)",
+    icon: Moon,
+    color: "from-violet-500 to-purple-400",
+    borderColor: "border-violet-500/40",
+    models: ["kimi-k2.6", "kimi-k2.5", "kimi-k2-0905-preview"],
   },
 ];
 

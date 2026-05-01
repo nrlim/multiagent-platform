@@ -17,15 +17,23 @@ import { useHiveStore } from "@/lib/store";
 import {
   createBucketTask, updateBucketTask, deleteBucketTask,
   startBucketFactory, stopBucketFactory, listBucketTasks,
-  type BucketTask, type BucketPriority, type BucketStartResponse,
+  type BucketTask, type BucketPriority, type BucketCardType, type BucketStartResponse,
 } from "@/lib/engine-client";
 import { AddTaskModal } from "@/components/add-task-modal";
+import { TaskDetailModal } from "@/components/task-bucket";
 
 // ─── Priority config ──────────────────────────────────────────────────────────
 const PRIORITY_CFG: Record<BucketPriority, { label: string; dot: string; cls: string }> = {
   HIGH:   { label: "High",   dot: "bg-rose-500",   cls: "bg-rose-50 text-rose-700 border-rose-200" },
   MEDIUM: { label: "Medium", dot: "bg-amber-500",  cls: "bg-amber-50 text-amber-700 border-amber-200" },
   LOW:    { label: "Low",    dot: "bg-slate-500",  cls: "bg-slate-50 text-slate-600 border-slate-200" },
+};
+
+// ─── Card type config ─────────────────────────────────────────────────────────
+const CARD_TYPE_CFG: Record<BucketCardType, { label: string; prefix: string; cls: string; dot: string }> = {
+  STORY: { label: "Story", prefix: "ST", cls: "bg-violet-50 text-violet-700 border-violet-200", dot: "bg-violet-500" },
+  TASK:  { label: "Task",  prefix: "TK", cls: "bg-blue-50 text-blue-700 border-blue-200",       dot: "bg-blue-500" },
+  BUG:   { label: "Bug",   prefix: "BG", cls: "bg-red-50 text-red-700 border-red-200",          dot: "bg-red-500" },
 };
 
 // ─── Kanban column definitions ────────────────────────────────────────────────
@@ -64,12 +72,13 @@ const COLUMNS: KanbanCol[] = [
 
 // ─── Task Card ────────────────────────────────────────────────────────────────
 function KanbanCard({
-  task, index, onDelete, onEdit, onFocusTask,
+  task, index, onDelete, onEdit, onFocusTask, onViewDetail
 }: {
   task: BucketTask; index: number;
   onDelete: (id: string) => void;
   onEdit: (task: BucketTask) => void;
   onFocusTask?: (id: string) => void;
+  onViewDetail: (task: BucketTask) => void;
 }) {
   const pri     = PRIORITY_CFG[task.priority] ?? PRIORITY_CFG.MEDIUM;
   const isActive= task.status === "IN_PROGRESS";
@@ -133,7 +142,33 @@ function KanbanCard({
 
           {/* Content */}
           <div className="pl-4">
+            {/* Card type badge + ID */}
+            {(() => {
+              const ct = CARD_TYPE_CFG[(task.card_type as BucketCardType) ?? "TASK"] ?? CARD_TYPE_CFG.TASK;
+              const shortId = task.id.slice(0, 6).toUpperCase();
+              return (
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className={cn("inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded border tracking-widest", ct.cls)}>
+                    <span className={cn("w-1.5 h-1.5 rounded-full", ct.dot)} />
+                    {ct.label}
+                  </span>
+                  <span className="text-[9px] font-mono text-slate-400">{ct.prefix}-{shortId}</span>
+                </div>
+              );
+            })()}
+
             <p className="text-xs font-medium text-slate-800 leading-snug pr-4 mb-2">{task.title}</p>
+
+            {/* Description Preview Button */}
+            {task.description && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); onViewDetail(task); }}
+                className="mb-3 text-[10px] text-indigo-600 font-semibold cursor-pointer hover:text-indigo-700 hover:bg-indigo-50/80 px-2 py-1 rounded border border-indigo-100 transition-colors inline-flex items-center gap-1.5"
+              >
+                <Info className="w-3 h-3" />
+                View Detailed Story
+              </button>
+            )}
 
             {/* Tags row */}
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -199,13 +234,14 @@ function KanbanCard({
 
 // ─── Kanban Column ────────────────────────────────────────────────────────────
 function KanbanColumn({
-  col, tasks, onDelete, onEdit, onAddClick, onFocusTask,
+  col, tasks, onDelete, onEdit, onAddClick, onFocusTask, onViewDetail
 }: {
   col: KanbanCol; tasks: BucketTask[];
   onDelete: (id: string) => void;
   onEdit: (task: BucketTask) => void;
   onAddClick?: () => void;
   onFocusTask?: (id: string) => void;
+  onViewDetail: (task: BucketTask) => void;
 }) {
   const ColIcon = col.icon;
   const isActive = col.id === "in_progress";
@@ -262,7 +298,7 @@ function KanbanColumn({
                 </motion.div>
               ) : (
                 tasks.map((task, index) => (
-                  <KanbanCard key={task.id} task={task} index={index} onDelete={onDelete} onEdit={onEdit} onFocusTask={onFocusTask} />
+                  <KanbanCard key={task.id} task={task} index={index} onDelete={onDelete} onEdit={onEdit} onFocusTask={onFocusTask} onViewDetail={onViewDetail} />
                 ))
               )}
             </AnimatePresence>
@@ -283,6 +319,7 @@ export default function BacklogPage() {
   const router = useRouter();
   const [showModal,    setShowModal]    = useState(false);
   const [editingTask,  setEditingTask]  = useState<BucketTask | null>(null);
+  const [detailTask,   setDetailTask]   = useState<BucketTask | null>(null);
   const [isStarting,   setIsStarting]   = useState(false);
   const [isStopping,   setIsStopping]   = useState(false);
   const [runQa,        setRunQa]        = useState(false);
@@ -318,6 +355,7 @@ export default function BacklogPage() {
       const fake: BucketTask = {
         id: Math.random().toString(36).slice(2, 10), title,
         description: desc, priority, status: "PENDING",
+        card_type: "TASK", story_id: null,
         hive_id: null, assigned_agent_id: null, assigned_role: null,
         error_log: null, retry_count: 0, max_retries: 2,
         parent_task_id: null, created_at: new Date().toISOString(),
@@ -514,6 +552,7 @@ export default function BacklogPage() {
                 onEdit={(task) => setEditingTask(task)}
                 onAddClick={col.id === "backlog" ? () => setShowModal(true) : undefined}
                 onFocusTask={handleFocusTask}
+                onViewDetail={setDetailTask}
               />
             ))}
           </div>
@@ -533,6 +572,12 @@ export default function BacklogPage() {
             initialTask={editingTask}
             onAdd={handleEditTask}
             onClose={() => setEditingTask(null)}
+          />
+        )}
+        {detailTask && (
+          <TaskDetailModal
+            task={detailTask}
+            onClose={() => setDetailTask(null)}
           />
         )}
       </AnimatePresence>

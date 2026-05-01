@@ -43,7 +43,28 @@ class FileSystemTool:
             Dict with 'success', 'path', 'bytes_written'.
         """
         target = self._resolve(relative_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Ensure all parent directories exist.
+        # On Windows, if a path component (e.g. src/config) was previously
+        # written as a FILE by the LLM and now needs to be a DIRECTORY,
+        # mkdir() raises WinError 183. Detect and handle this gracefully.
+        parent = target.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except (FileExistsError, OSError):
+            # Walk each segment and remove any file that blocks a needed directory
+            parts = parent.relative_to(self.session_dir).parts
+            current = self.session_dir
+            for part in parts:
+                current = current / part
+                if current.exists() and current.is_file():
+                    self._log(
+                        "warning",
+                        f"⚠️  Removing file that conflicts with directory: "
+                        f"{current.relative_to(self.session_dir)}"
+                    )
+                    current.unlink()
+            parent.mkdir(parents=True, exist_ok=True)
 
         self._log("file", f"📝 Writing file: {relative_path}")
         target.write_text(content, encoding="utf-8")

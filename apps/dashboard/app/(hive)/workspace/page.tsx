@@ -8,31 +8,35 @@ import {
   RefreshCw, Download, ChevronRight, ChevronDown,
   Search, Copy, Check, AlertCircle, Database, HardDrive,
   Layers, Code2, GitBranch, Clock, X, Zap,
+  Play, Square, ExternalLink, Terminal, ChevronUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHiveStore } from "@/lib/store";
 import {
   getWorkspaceSnapshot, getSessionWorkspace, saveWorkspaceSnapshot,
-  parseFilesJson, type FileNode, getHiveFiles,
+  parseFilesJson, type FileNode, getHiveFiles, renameWorkspaceFile
 } from "@/lib/engine-client";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-// @ts-ignore
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import dynamic from "next/dynamic";
 
-// ─── Language / icon helpers ──────────────────────────────────────────────────
+const MonacoEditor = dynamic(() => import("@/components/MonacoEditor"), { ssr: false });
 
-function getLang(ext?: string | null) {
-  if (!ext) return "text";
+function getMonacoLang(ext?: string | null): string {
+  if (!ext) return "plaintext";
   const e = ext.replace(".", "").toLowerCase();
   const m: Record<string, string> = {
     js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript",
     py: "python", go: "go", rs: "rust", rb: "ruby", java: "java",
     md: "markdown", json: "json", yaml: "yaml", yml: "yaml",
-    html: "html", css: "css", sh: "bash", bash: "bash",
-    sql: "sql", toml: "toml", prisma: "typescript",
+    html: "html", css: "css", scss: "scss", sh: "shell", bash: "shell",
+    sql: "sql", toml: "ini", prisma: "typescript", env: "ini",
+    dockerfile: "dockerfile", xml: "xml", cs: "csharp",
+    cpp: "cpp", c: "c", php: "php",
   };
-  return m[e] ?? e;
+  return m[e] ?? "plaintext";
 }
+
+// ─── Language / icon helpers ──────────────────────────────────────────────────
+
 
 const EXT_COLORS: Record<string, string> = {
   ".ts":   "text-sky-600",    ".tsx":  "text-sky-600",
@@ -263,158 +267,295 @@ function TreeNode({
 
 // ─── Open Tabs ────────────────────────────────────────────────────────────────
 
-function TabBar({ tabs, activeTab, onSelect, onClose, modifiedPaths }: {
+function TabBar({ tabs, activeTab, onSelect, onClose, onCloseAll, onCloseOther, modifiedPaths }: {
   tabs: FileNode[];
   activeTab: string | null;
   onSelect: (path: string) => void;
   onClose: (path: string) => void;
+  onCloseAll: () => void;
+  onCloseOther: (path: string) => void;
   modifiedPaths: Set<string>;
 }) {
   if (tabs.length === 0) return null;
   return (
-    <div className="flex items-center border-b border-slate-200 bg-slate-50 overflow-x-auto shrink-0 pt-1.5 px-1">
-      {tabs.map(tab => (
-        <div
-          key={tab.path}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-2 border border-b-0 cursor-pointer group shrink-0 transition-colors rounded-t-lg mx-0.5 relative top-[1px]",
-            activeTab === tab.path
-              ? "bg-white border-slate-200 text-slate-900 shadow-[0_-2px_4px_rgba(0,0,0,0.02)] z-10"
-              : "bg-slate-100/50 border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800",
-          )}
-          onClick={() => onSelect(tab.path)}
-        >
-          <FileIcon ext={tab.extension} />
-          <span className="text-xs font-medium">{tab.name}</span>
-          {/* Live-modified indicator */}
-          {modifiedPaths.has(tab.path) && (
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" title="Modified by agent" />
-          )}
-          <button
-            onClick={(e) => { e.stopPropagation(); onClose(tab.path); }}
-            className="ml-1 p-0.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-slate-200 transition-all text-slate-400 hover:text-slate-700"
+    <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 shrink-0 pt-1.5 px-1 pr-3">
+      <div className="flex items-center overflow-x-auto">
+        {tabs.map(tab => (
+          <div
+            key={tab.path}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-2 border border-b-0 cursor-pointer group shrink-0 transition-colors rounded-t-lg mx-0.5 relative top-[1px]",
+              activeTab === tab.path
+                ? "bg-white border-slate-200 text-slate-900 shadow-[0_-2px_4px_rgba(0,0,0,0.02)] z-10"
+                : "bg-slate-100/50 border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800",
+            )}
+            onClick={() => onSelect(tab.path)}
           >
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-      ))}
+            <FileIcon ext={tab.extension} />
+            <span className="text-xs font-medium">{tab.name}</span>
+            {/* Live-modified indicator */}
+            {modifiedPaths.has(tab.path) && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" title="Modified by agent" />
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(tab.path); }}
+              className="ml-1 p-0.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-slate-200 transition-all text-slate-400 hover:text-slate-700"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 pl-3 border-l border-slate-200 shrink-0">
+        <button onClick={() => activeTab && onCloseOther(activeTab)} disabled={!activeTab || tabs.length <= 1} className="text-[10px] font-medium text-slate-500 hover:text-slate-800 disabled:opacity-30 transition-colors">Close Others</button>
+        <button onClick={onCloseAll} className="text-[10px] font-medium text-slate-500 hover:text-slate-800 transition-colors">Close All</button>
+      </div>
     </div>
   );
 }
 
-// ─── Code Viewer ─────────────────────────────────────────────────────────────
+// ─── Code Viewer / Editor ─────────────────────────────────────────────────────
 
 function CodeViewer({
-  file, hiveId, refreshTick,
+  file, hiveId, refreshTick, onRename
 }: {
   file: FileNode | null;
   hiveId: string | null;
   refreshTick: number;  // increment to force reload
+  onRename?: (oldPath: string, newPath: string) => void;
 }) {
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading]  = useState(false);
-  const [copied,  setCopied]   = useState(false);
-  const [error,   setError]    = useState<string | null>(null);
+  const [content,   setContent]   = useState<string | null>(null);
+  const [draftContent, setDraftContent] = useState<string | null>(null);
+  const [loading,   setLoading]   = useState(false);
+  const [copied,    setCopied]    = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<"saved" | "unsaved" | "saving" | "error">("saved");
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hiveIdRef = useRef(hiveId);
+  hiveIdRef.current = hiveId;
 
+  // Load file from backend
   useEffect(() => {
-    if (!file || file.type === "directory") { setContent(null); return; }
-    setLoading(true); setError(null);
+    if (!file || file.type === "directory") { setContent(null); setDraftContent(null); return; }
+    setLoading(true); setError(null); setSaveState("saved");
     const params = new URLSearchParams({ path: file.path });
     if (hiveId) params.set("hive_id", hiveId);
     fetch(`/api/engine/workspace/file?${params}`)
       .then(r => r.ok ? r.text() : Promise.reject(r.statusText))
-      .then(t => { setContent(t); setLoading(false); })
+      .then(t => { setContent(t); setDraftContent(t); setLoading(false); })
       .catch(e => { setError(String(e)); setLoading(false); });
-  // refreshTick is intentionally a dependency so the file reloads on agent writes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.path, hiveId, refreshTick]);
 
+  // Save function
+  const saveFile = useCallback(async (value: string) => {
+    if (!file) return;
+    setSaveState("saving");
+    try {
+      const res = await fetch(`/api/engine/workspace/file`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: file.path, content: value, hive_id: hiveIdRef.current }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setContent(value);
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+      setTimeout(() => setSaveState("unsaved"), 2000);
+    }
+  }, [file]);
+
+  // Editor onChange — mark unsaved + debounce auto-save (2 seconds)
+  const handleEditorChange = useCallback((value: string) => {
+    setDraftContent(value);
+    setSaveState("unsaved");
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => saveFile(value), 2000);
+  }, [saveFile]);
+
   const handleCopy = () => {
-    if (!content) return;
-    navigator.clipboard.writeText(content);
+    const val = draftContent ?? content;
+    if (!val) return;
+    navigator.clipboard.writeText(val);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const isBinary = file?.extension
+    ? [".png",".jpg",".jpeg",".gif",".svg",".ico",".webp",".woff",".woff2",".ttf",".pdf"]
+        .includes((file.extension.startsWith(".") ? file.extension : "." + file.extension).toLowerCase())
+    : false;
 
   if (!file) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 text-slate-700">
         <Code2 className="w-12 h-12 opacity-30" />
         <div className="text-center">
-          <p className="text-sm font-semibold text-slate-600">Select a file to inspect</p>
-          <p className="text-xs text-slate-700 mt-1">Syntax highlighting · auto-refreshes on agent writes</p>
+          <p className="text-sm font-semibold text-slate-600">Select a file to edit</p>
+          <p className="text-xs text-slate-700 mt-1">Full Monaco editor · Ctrl+S to save · Auto-saves after 2s</p>
         </div>
       </div>
     );
   }
 
-  const lineCount = content?.split("\n").length ?? 0;
   const ext = file.extension;
+  const monacoLang = getMonacoLang(ext);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-white shrink-0">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-[#21262d] bg-[#161b22] shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <FileIcon ext={ext} />
-          <span className="text-xs font-mono text-slate-500 truncate">{file.path}</span>
+          <span className="text-xs font-mono text-slate-400 truncate">{file.path}</span>
           {file.size != null && file.size > 0 && (
-            <span className="text-[10px] text-slate-700 shrink-0">{(file.size / 1024).toFixed(1)} KB</span>
+            <span className="text-[10px] text-slate-600 shrink-0">{(file.size / 1024).toFixed(1)} KB</span>
+          )}
+          {/* Save status indicator */}
+          {saveState === "unsaved" && (
+            <span className="flex items-center gap-1 text-[10px] text-amber-400 font-mono ml-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              unsaved
+            </span>
+          )}
+          {saveState === "saving" && (
+            <span className="flex items-center gap-1 text-[10px] text-indigo-400 font-mono ml-1">
+              <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+              saving…
+            </span>
+          )}
+          {saveState === "saved" && content !== null && (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-500 font-mono ml-1">
+              <Check className="w-2.5 h-2.5" />
+              saved
+            </span>
+          )}
+          {saveState === "error" && (
+            <span className="flex items-center gap-1 text-[10px] text-red-400 font-mono ml-1">
+              <AlertCircle className="w-2.5 h-2.5" />
+              save failed
+            </span>
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {loading && (
-            <span className="flex items-center gap-1 text-[10px] text-indigo-600 mr-2">
+            <span className="flex items-center gap-1 text-[10px] text-indigo-500 mr-2">
               <RefreshCw className="w-2.5 h-2.5 animate-spin" /> syncing…
             </span>
           )}
-          {content && (
-            <span className="text-[10px] font-mono text-slate-600 mr-2">{lineCount} lines</span>
+          {/* Save button */}
+          {saveState === "unsaved" && (
+            <button
+              onClick={() => draftContent != null && saveFile(draftContent)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 border border-indigo-500/30 transition-all mr-1"
+            >
+              <Check className="w-3 h-3" /> Save
+              <kbd className="text-[9px] opacity-50 font-mono">Ctrl+S</kbd>
+            </button>
           )}
+          {/* Rename button */}
+          <button
+            onClick={() => {
+              const newName = prompt("Enter new path:", file.path);
+              if (newName && newName !== file.path && onRename) {
+                onRename(file.path, newName);
+              }
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 transition-all"
+          >
+            <FileCog className="w-3 h-3" /> Rename
+          </button>
           <button
             onClick={handleCopy}
-            disabled={!content}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all disabled:opacity-30"
+            disabled={!(draftContent ?? content)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 transition-all disabled:opacity-30"
           >
-            {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+            {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
             {copied ? "Copied" : "Copy"}
           </button>
           <a
             href={`/api/engine/workspace/file?path=${encodeURIComponent(file.path)}${hiveId ? `&hive_id=${hiveId}` : ""}&download=1`}
             download={file.name}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-slate-500 hover:text-slate-300 hover:bg-slate-700/50 transition-all"
           >
             <Download className="w-3 h-3" /> Download
           </a>
         </div>
       </div>
 
-      {/* Code body */}
-      <div className="flex-1 overflow-auto min-h-0">
+      {/* Editor body */}
+      <div className="flex-1 min-h-0 bg-[#0d1117] overflow-hidden flex flex-col">
         {error ? (
-          <div className="flex items-center justify-center h-32 gap-2 text-red-600/80">
+          <div className="flex items-center justify-center h-32 gap-2 text-red-500/80">
             <AlertCircle className="w-4 h-4" />
             <span className="text-xs">{error}</span>
           </div>
-        ) : content != null ? (
-          <SyntaxHighlighter
-            language={getLang(ext)}
-            style={oneLight}
-            customStyle={{ margin: 0, padding: "1.5rem", fontSize: "12px", backgroundColor: "transparent", minHeight: "100%" }}
-            showLineNumbers
-            lineNumberStyle={{ color: "#94a3b8", minWidth: "2.5em" }}
-            wrapLines
-            wrapLongLines
-          >
-            {content}
-          </SyntaxHighlighter>
+        ) : isBinary ? (
+          <div className="flex items-center justify-center h-full">
+            <pre className="p-4 text-[12px] font-mono text-slate-600">Binary file — cannot display</pre>
+          </div>
+        ) : draftContent != null ? (
+          <div className="monaco-editor-wrapper">
+            <MonacoEditor
+              value={draftContent}
+              language={monacoLang}
+              onChange={handleEditorChange}
+              onSave={saveFile}
+              height="100%"
+            />
+          </div>
         ) : loading ? (
           <div className="flex items-center justify-center h-32 gap-2 text-slate-600">
             <RefreshCw className="w-4 h-4 animate-spin" />
             <span className="text-xs">Loading…</span>
           </div>
         ) : (
-          <pre className="p-4 text-[12px] font-mono text-slate-500">Binary or empty file</pre>
+          <pre className="p-4 text-[12px] font-mono text-slate-600">Empty file</pre>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Run Console ──────────────────────────────────────────────────────────────
+interface RunLog { line: string; level: string; }
+function RunConsole({ logs, isRunning, devUrl, onStop }: {
+  logs: RunLog[]; isRunning: boolean; devUrl: string | null; onStop: () => void;
+}) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs.length]);
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900 shrink-0">
+        <Terminal className="w-3.5 h-3.5 text-slate-400" />
+        <span className="text-[11px] font-semibold text-slate-300">Run Console</span>
+        {isRunning && (
+          <motion.span animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.2, repeat: Infinity }}
+            className="text-[10px] text-emerald-400 font-mono ml-1">● running</motion.span>
+        )}
+        {devUrl && (
+          <a href={devUrl} target="_blank" rel="noreferrer"
+            className="ml-auto flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 font-mono transition-colors">
+            <ExternalLink className="w-3 h-3" />{devUrl}
+          </a>
+        )}
+        {isRunning && (
+          <button onClick={onStop}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] text-red-400 hover:text-red-300 border border-red-800/40 hover:border-red-600/50 transition-all ml-2">
+            <Square className="w-2.5 h-2.5" /> Stop
+          </button>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-0.5 bg-slate-950 font-mono">
+        {logs.map((log, i) => (
+          <div key={i} className={cn(
+            "text-[11px] leading-relaxed",
+            log.level === "error" ? "text-red-400" :
+            log.level === "success" ? "text-emerald-400" : "text-slate-300"
+          )}>{log.line}</div>
+        ))}
+        <div ref={bottomRef} />
       </div>
     </div>
   );
@@ -443,6 +584,14 @@ export default function WorkspacePage() {
   // Track which open tabs have been modified since opened
   const [modifiedPaths, setModifiedPaths] = useState<Set<string>>(new Set());
 
+  // Run workspace state
+  const [runLogs,    setRunLogs]    = useState<{ line: string; level: string }[]>([]);
+  const [isRunning,  setIsRunning]  = useState(false);
+  const [devUrl,     setDevUrl]     = useState<string | null>(null);
+  const [showConsole, setShowConsole] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const runAbortRef = useRef<(() => void) | null>(null);
+
   const recentPaths = useMemo(() => new Set(recentChanges.map(c => c.path)), [recentChanges]);
 
   // ── auto-expand dirs ───────────────────────────────────────────────────────
@@ -459,6 +608,7 @@ export default function WorkspacePage() {
     walk(nodes, 0);
     setExpandedDirs(dirs);
   }, []);
+
 
   // ── fetch files ────────────────────────────────────────────────────────────
   const refreshFiles = useCallback(async () => {
@@ -508,7 +658,84 @@ export default function WorkspacePage() {
     }
   }, [hiveId, autoExpand]);
 
+  // ── Rename handler ─────────────────────────────────────────────────────────
+  const handleRename = useCallback(async (oldPath: string, newPath: string) => {
+    try {
+      const ok = await renameWorkspaceFile(oldPath, newPath, hiveId);
+      if (ok) {
+        setOpenTabs(tabs => tabs.map(t => t.path === oldPath ? { ...t, path: newPath, name: newPath.split("/").pop() ?? newPath } : t));
+        if (selectedPath === oldPath) setSelectedPath(newPath);
+        refreshFiles();
+      } else {
+        alert("Failed to rename file");
+      }
+    } catch (e) {
+      alert("Error renaming file: " + String(e));
+    }
+  }, [hiveId, selectedPath, refreshFiles]);
+
   useEffect(() => { refreshFiles(); }, [refreshFiles]);
+
+  // Handle run workspace via SSE
+  const handleRunWorkspace = useCallback(async () => {
+    if (!hiveId) return;
+    // Stop any existing run
+    runAbortRef.current?.();
+    setRunLogs([]);
+    setDevUrl(null);
+    setIsRunning(true);
+    setShowConsole(true);
+
+    // Connect directly to engine to avoid Next.js proxy buffering
+    const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL ?? "http://localhost:8000";
+    const es = new EventSource(`${ENGINE_URL}/workspace/${hiveId}/run`, { withCredentials: false });
+    runAbortRef.current = () => es.close();
+
+    es.addEventListener("log", (e) => {
+      const d = JSON.parse(e.data) as { line: string; level: string };
+      setRunLogs(prev => [...prev, d]);
+    });
+    es.addEventListener("error", (e: MessageEvent) => {
+      try {
+        const d = JSON.parse(e.data) as { line?: string, level?: string };
+        setRunLogs(prev => [...prev, { line: d.line || "❌ Stream error", level: d.level || "error" }]);
+      } catch (err) {
+        setRunLogs(prev => [...prev, { line: "❌ Stream connection error", level: "error" }]);
+      }
+    });
+    es.addEventListener("started", (e) => {
+      const d = JSON.parse(e.data) as { url: string };
+      setDevUrl(d.url);
+    });
+    es.addEventListener("ready", (e) => {
+      const d = JSON.parse(e.data) as { url: string };
+      setDevUrl(d.url);
+    });
+    es.addEventListener("done", () => {
+      es.close();
+      setIsRunning(false);
+    });
+    es.onerror = (e) => {
+      // readyState 2 = CLOSED (truly disconnected)
+      // readyState 0 = CONNECTING (browser auto-reconnecting, ignore)
+      if (es.readyState === EventSource.CLOSED) {
+        es.close();
+        setIsRunning(false);
+        setRunLogs(prev => [...prev, { line: "❌ Connection lost", level: "error" }]);
+      }
+    };
+  }, [hiveId]);
+
+  const handleStopWorkspace = useCallback(async () => {
+    runAbortRef.current?.();
+    runAbortRef.current = null;
+    if (hiveId) {
+      await fetch(`/api/engine/workspace/${hiveId}/run`, { method: "DELETE" }).catch(() => {});
+    }
+    setIsRunning(false);
+    setRunLogs(prev => [...prev, { line: "⏹ Server stopped", level: "info" }]);
+  }, [hiveId]);
+
 
   // ── Re-fetch on FILE_CHANGE events ────────────────────────────────────────
   const prevChangesLen = useRef(0);
@@ -587,7 +814,7 @@ export default function WorkspacePage() {
     [search, allFiles]
   );
 
-  const activeFile = useMemo(() =>
+  const activeFileNode = useMemo(() =>
     openTabs.find(t => t.path === selectedPath) ?? null,
     [openTabs, selectedPath]
   );
@@ -596,13 +823,17 @@ export default function WorkspacePage() {
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-white">
       {/* ── Topbar ─────────────────────────────────────────────────────────── */}
       <header className="glass-panel border-b border-slate-200 flex items-center justify-between px-6 py-3.5 shrink-0 z-30 bg-slate-50/50">
-        <div>
-          <h1 className="text-sm font-semibold text-slate-900 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-md bg-indigo-50 border border-indigo-200 flex items-center justify-center">
-              <Layers className="w-3.5 h-3.5 text-indigo-600" />
+        <div className="flex flex-col min-w-0">
+          {/* Header Left */}
+          <div className="flex items-center gap-3">
+            <button onClick={() => setShowSidebar(!showSidebar)} className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all" title="Toggle Sidebar">
+              {showSidebar ? <FolderOpen className="w-4 h-4" /> : <FolderClosed className="w-4 h-4" />}
+            </button>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <Code2 className="w-4 h-4 text-indigo-500" />
+              Workspace
             </div>
-            Workspace Explorer
-          </h1>
+          </div>
           <div className="flex items-center gap-3 mt-1">
             <p className="text-[11px] text-slate-500">
               {hiveId
@@ -657,6 +888,34 @@ export default function WorkspacePage() {
             <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
             Sync
           </button>
+          {/* Run Workspace button */}
+          <button
+            id="run-workspace-btn"
+            onClick={isRunning ? handleStopWorkspace : handleRunWorkspace}
+            disabled={!hiveId}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[11px] font-semibold border transition-all shadow-sm disabled:opacity-40",
+              isRunning
+                ? "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                : "bg-indigo-600 border-indigo-700 text-white hover:bg-indigo-700 shadow-indigo-200"
+            )}
+          >
+            {isRunning ? (
+              <><Square className="w-3 h-3" /> Stop Server</>
+            ) : (
+              <><Play className="w-3 h-3" /> Run Workspace</>
+            )}
+          </button>
+          {/* Console toggle */}
+          {(showConsole || runLogs.length > 0 || isRunning) && (
+            <button
+              onClick={() => setShowConsole(s => !s)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] border border-slate-200 text-slate-600 hover:bg-slate-100 transition-all"
+            >
+              <Terminal className="w-3 h-3" />
+              {showConsole ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          )}
         </div>
       </header>
 
@@ -664,117 +923,119 @@ export default function WorkspacePage() {
       <div className="flex-1 flex min-h-0 overflow-hidden">
 
         {/* Sidebar — File Tree */}
-        <aside className="w-72 shrink-0 border-r border-slate-200 flex flex-col overflow-hidden bg-slate-50/30">
-          {/* Search */}
-          <div className="px-3 py-2.5 border-b border-slate-200 bg-white/50">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Find file…"
-                className="w-full pl-7 pr-3 py-1.5 rounded-md bg-white border border-slate-200 text-[11px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all shadow-sm"
-              />
-            </div>
-          </div>
-
-          {/* Explorer label */}
-          <div className="px-4 py-1.5 flex items-center justify-between">
-            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Explorer</span>
-            <span className="text-[10px] text-slate-600 font-mono tracking-tight">{allFiles.length} files</span>
-          </div>
-
-          {/* Tree */}
-          <div className="flex-1 overflow-y-auto px-1 pb-2 min-h-0 custom-scrollbar">
-            {!hiveId ? (
-              <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-700">
-                <FolderClosed className="w-6 h-6 opacity-40" />
-                <p className="text-xs text-center px-2">No session active. Start a Hive run to see files.</p>
-              </div>
-            ) : refreshing && fileTree.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-700">
-                <RefreshCw className="w-4 h-4 opacity-40 animate-spin" />
-                <p className="text-[11px] text-center px-2">Scanning workspace…</p>
-              </div>
-            ) : fileTree.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-700">
-                <RefreshCw className="w-4 h-4 opacity-40" />
-                <p className="text-[11px] text-center px-2">Files appear as agents generate them</p>
-              </div>
-            ) : filtered ? (
-              // Search results flat list
-              filtered.length === 0 ? (
-                <p className="text-xs text-slate-600 text-center py-6">No matches for "{search}"</p>
-              ) : (
-                filtered.map(n => (
-                  <button
-                    key={n.path}
-                    onClick={() => handleSelectFile(n)}
-                    className={cn(
-                      "w-full flex items-center gap-2 px-3 py-1.5 rounded text-left text-xs transition-colors",
-                      selectedPath === n.path
-                        ? "bg-indigo-50 text-indigo-700 font-semibold"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                    )}
-                  >
-                    <FileIcon ext={n.extension} />
-                    <span className="truncate">{n.name}</span>
-                    <span className="ml-auto text-[10px] text-slate-400 font-mono truncate">
-                      {n.path.split("/").slice(0, -1).join("/")}
-                    </span>
-                    {recentPaths.has(n.path) && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                    )}
-                  </button>
-                ))
-              )
-            ) : (
-              // Full tree
-              fileTree.map(node => (
-                <TreeNode
-                  key={node.path}
-                  node={node}
-                  selectedPath={selectedPath}
-                  recentPaths={recentPaths}
-                  expandedDirs={expandedDirs}
-                  onToggleDir={toggleDir}
-                  onSelectFile={handleSelectFile}
+        {showSidebar && (
+          <aside className="w-72 shrink-0 border-r border-slate-200 flex flex-col overflow-hidden bg-slate-50/30">
+            {/* Search */}
+            <div className="px-3 py-2.5 border-b border-slate-200 bg-white/50">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Find file…"
+                  className="w-full pl-7 pr-3 py-1.5 rounded-md bg-white border border-slate-200 text-[11px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all shadow-sm"
                 />
-              ))
-            )}
-          </div>
-
-          {/* Recent Changes Strip */}
-          {recentChanges.length > 0 && (
-            <div className="border-t border-slate-200 px-3 py-2 shrink-0">
-              <p className="text-[9px] uppercase tracking-widest text-slate-700 mb-1.5">Live changes</p>
-              {recentChanges.slice(-5).reverse().map((c, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    // Try to find the file in the tree and open it
-                    const found = allFiles.find(f => f.path === c.path || f.name === c.path.split("/").pop());
-                    if (found) handleSelectFile(found);
-                  }}
-                  className="w-full flex items-center gap-1.5 mb-0.5 hover:bg-slate-100 rounded px-1 py-0.5 transition-colors group"
-                >
-                  <span className={cn(
-                    "text-[9px] font-black px-1 py-0.5 rounded uppercase shrink-0",
-                    c.op === "created"  ? "bg-emerald-50 text-emerald-600 border border-emerald-100" :
-                    c.op === "modified" ? "bg-indigo-50 text-indigo-600 border border-indigo-100"   :
-                                         "bg-red-50 text-red-600 border border-red-100"
-                  )}>{c.op[0]}</span>
-                  <span className="text-[10px] text-slate-500 font-mono truncate group-hover:text-slate-800 transition-colors">
-                    {c.path.split("/").pop()}
-                  </span>
-                </button>
-              ))}
+              </div>
             </div>
-          )}
-        </aside>
 
-        {/* Right pane — Tabs + Code Viewer */}
+            {/* Explorer label */}
+            <div className="px-4 py-1.5 flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Explorer</span>
+              <span className="text-[10px] text-slate-600 font-mono tracking-tight">{allFiles.length} files</span>
+            </div>
+
+            {/* Tree */}
+            <div className="flex-1 overflow-y-auto px-1 pb-2 min-h-0 custom-scrollbar">
+              {!hiveId ? (
+                <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-700">
+                  <FolderClosed className="w-6 h-6 opacity-40" />
+                  <p className="text-xs text-center px-2">No session active. Start a Hive run to see files.</p>
+                </div>
+              ) : refreshing && fileTree.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-700">
+                  <RefreshCw className="w-4 h-4 opacity-40 animate-spin" />
+                  <p className="text-[11px] text-center px-2">Scanning workspace…</p>
+                </div>
+              ) : fileTree.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-700">
+                  <RefreshCw className="w-4 h-4 opacity-40" />
+                  <p className="text-[11px] text-center px-2">Files appear as agents generate them</p>
+                </div>
+              ) : filtered ? (
+                // Search results flat list
+                filtered.length === 0 ? (
+                  <p className="text-xs text-slate-600 text-center py-6">No matches for &quot;{search}&quot;</p>
+                ) : (
+                  filtered.map(n => (
+                    <button
+                      key={n.path}
+                      onClick={() => handleSelectFile(n)}
+                      className={cn(
+                        "w-full flex items-center gap-2 px-3 py-1.5 rounded text-left text-xs transition-colors",
+                        selectedPath === n.path
+                          ? "bg-indigo-50 text-indigo-700 font-semibold"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      )}
+                    >
+                      <FileIcon ext={n.extension} />
+                      <span className="truncate">{n.name}</span>
+                      <span className="ml-auto text-[10px] text-slate-400 font-mono truncate">
+                        {n.path.split("/").slice(0, -1).join("/")}
+                      </span>
+                      {recentPaths.has(n.path) && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                      )}
+                    </button>
+                  ))
+                )
+              ) : (
+                // Full tree
+                fileTree.map(node => (
+                  <TreeNode
+                    key={node.path}
+                    node={node}
+                    selectedPath={selectedPath}
+                    recentPaths={recentPaths}
+                    expandedDirs={expandedDirs}
+                    onToggleDir={toggleDir}
+                    onSelectFile={handleSelectFile}
+                  />
+                ))
+              )}
+            </div>
+
+            {/* Recent Changes Strip */}
+            {recentChanges.length > 0 && (
+              <div className="border-t border-slate-200 px-3 py-2 shrink-0">
+                <p className="text-[9px] uppercase tracking-widest text-slate-700 mb-1.5">Live changes</p>
+                {recentChanges.slice(-5).reverse().map((c, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      // Try to find the file in the tree and open it
+                      const found = allFiles.find(f => f.path === c.path || f.name === c.path.split("/").pop());
+                      if (found) handleSelectFile(found);
+                    }}
+                    className="w-full flex items-center gap-1.5 mb-0.5 hover:bg-slate-100 rounded px-1 py-0.5 transition-colors group"
+                  >
+                    <span className={cn(
+                      "text-[9px] font-black px-1 py-0.5 rounded uppercase shrink-0",
+                      c.op === "created"  ? "bg-emerald-50 text-emerald-600 border border-emerald-100" :
+                      c.op === "modified" ? "bg-indigo-50 text-indigo-600 border border-indigo-100"   :
+                                           "bg-red-50 text-red-600 border border-red-100"
+                    )}>{c.op[0]}</span>
+                    <span className="text-[10px] text-slate-500 font-mono truncate group-hover:text-slate-800 transition-colors">
+                      {c.path.split("/").pop()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </aside>
+        )}
+
+        {/* Right pane — Tabs + Code Viewer + Run Console */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <TabBar
             tabs={openTabs}
@@ -784,11 +1045,40 @@ export default function WorkspacePage() {
               setRefreshTick(t => t + 1);
             }}
             onClose={handleCloseTab}
+            onCloseAll={() => { setOpenTabs([]); setSelectedPath(null); }}
+            onCloseOther={(path) => { 
+              const keep = openTabs.find(t => t.path === path);
+              if (keep) { setOpenTabs([keep]); setSelectedPath(path); }
+            }}
             modifiedPaths={modifiedPaths}
           />
-          <div className="flex-1 flex flex-col min-h-0 bg-white">
-            <CodeViewer file={activeFile} hiveId={hiveId} refreshTick={refreshTick} />
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-white">
+            <CodeViewer
+              file={activeFileNode}
+              hiveId={hiveId}
+              refreshTick={refreshTick}
+              onRename={handleRename}
+            />
           </div>
+          {/* Run Console panel — slides in from bottom */}
+          <AnimatePresence>
+            {showConsole && (
+              <motion.div
+                initial={{ height: 0 }}
+                animate={{ height: 280 }}
+                exit={{ height: 0 }}
+                transition={{ type: "spring", stiffness: 200, damping: 28 }}
+                className="shrink-0 overflow-hidden border-t border-slate-200"
+              >
+                <RunConsole
+                  logs={runLogs}
+                  isRunning={isRunning}
+                  devUrl={devUrl}
+                  onStop={handleStopWorkspace}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

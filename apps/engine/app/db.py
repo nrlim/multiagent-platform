@@ -513,6 +513,8 @@ async def db_create_task(
     description: str = "",
     priority: str = "MEDIUM",
     parent_task_id: str | None = None,
+    card_type: str = "TASK",
+    story_id: str | None = None,
 ) -> dict | None:
     """Insert a new task into the bucket. Returns the created record dict or None."""
     db = await _get_db()
@@ -526,6 +528,8 @@ async def db_create_task(
                 "description": description,
                 "priority": priority.upper(),
                 "status": "PENDING",
+                "card_type": card_type.upper(),
+                "story_id": story_id,
                 "parent_task_id": parent_task_id,
                 "created_at": datetime.utcnow(),
             }
@@ -657,6 +661,25 @@ async def db_create_debug_task(
         ),
         priority="HIGH",
         parent_task_id=parent_task_id,
+        card_type="BUG",
+    )
+
+
+async def db_create_bug_task(
+    story_id: str | None,
+    title: str,
+    description: str,
+    priority: str = "HIGH",
+) -> dict | None:
+    """Create a BUG card found by QA, optionally linked to a parent story."""
+    import uuid as _uuid
+    return await db_create_task(
+        task_id=str(_uuid.uuid4()),
+        title=title,
+        description=description,
+        priority=priority,
+        card_type="BUG",
+        story_id=story_id,
     )
 
 
@@ -711,6 +734,7 @@ async def db_get_system_settings() -> dict:
         "openai_key": "",
         "anthropic_key": "",
         "deepseek_key": "",
+        "kimi_key": "",
         "budget_limit": 2.0,
         "run_qa": True,
         "require_review": False
@@ -728,6 +752,7 @@ async def db_get_system_settings() -> dict:
             "openai_key": row.openai_key or "",
             "anthropic_key": row.anthropic_key or "",
             "deepseek_key": row.deepseek_key or "",
+            "kimi_key": getattr(row, "kimi_key", None) or "",
             "budget_limit": row.budget_limit,
             "run_qa": row.run_qa,
             "require_review": row.require_review
@@ -744,7 +769,7 @@ async def db_upsert_system_settings(data: dict) -> dict:
         return data
     try:
         update_data = {}
-        for k in ["provider", "model", "google_key", "openai_key", "anthropic_key", "deepseek_key", "budget_limit", "run_qa", "require_review"]:
+        for k in ["provider", "model", "google_key", "openai_key", "anthropic_key", "deepseek_key", "kimi_key", "budget_limit", "run_qa", "require_review"]:
             if k in data:
                 update_data[k] = data[k]
         
@@ -759,6 +784,7 @@ async def db_upsert_system_settings(data: dict) -> dict:
                     "openai_key": data.get("openai_key", ""),
                     "anthropic_key": data.get("anthropic_key", ""),
                     "deepseek_key": data.get("deepseek_key", ""),
+                    "kimi_key": data.get("kimi_key", ""),
                     "budget_limit": data.get("budget_limit", 2.0),
                     "run_qa": data.get("run_qa", True),
                     "require_review": data.get("require_review", False),
@@ -773,6 +799,7 @@ async def db_upsert_system_settings(data: dict) -> dict:
             "openai_key": row.openai_key or "",
             "anthropic_key": row.anthropic_key or "",
             "deepseek_key": row.deepseek_key or "",
+            "kimi_key": getattr(row, "kimi_key", None) or "",
             "budget_limit": row.budget_limit,
             "run_qa": row.run_qa,
             "require_review": row.require_review

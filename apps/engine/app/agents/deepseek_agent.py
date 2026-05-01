@@ -24,8 +24,8 @@ class DeepSeekAgent(BaseAgent):
         self.log("info", f"🐋 Initializing DeepSeek [{self.model_name}]")
         return ChatOpenAI(
             model=self.model_name,
-            openai_api_key=config.DEEPSEEK_API_KEY,
-            openai_api_base=DEEPSEEK_BASE_URL,
+            api_key=config.DEEPSEEK_API_KEY,
+            base_url=DEEPSEEK_BASE_URL,
             temperature=0.7,
             streaming=True,
         )

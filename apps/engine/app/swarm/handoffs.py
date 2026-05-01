@@ -21,31 +21,43 @@ def transfer_to_uiux_scout(ctx: SwarmContext, reason: str = "") -> Transfer:
     )
 
 
-def transfer_to_logic_weaver(ctx: SwarmContext, reason: str = "") -> Transfer:
-    """Hand off to the Logic Weaver (Backend) for API and business logic work."""
+def transfer_to_backend_dev(ctx: SwarmContext, reason: str = "") -> Transfer:
+    """Hand off to the Backend Developer for API and business logic work."""
     return Transfer(
-        target_routine="logic_weaver",
+        target_routine="backend_dev",
         context=ctx,
-        reason=reason or "Transferring to Logic Weaver for backend implementation.",
+        reason=reason or "Transferring to Backend Developer for backend implementation.",
     )
 
 
-def transfer_to_pixel_crafter(ctx: SwarmContext, reason: str = "") -> Transfer:
-    """Hand off to the Pixel Crafter (Frontend) for React/Next.js UI work."""
+# Alias for backward compat (do not use in new code)
+transfer_to_logic_weaver = transfer_to_backend_dev
+
+
+def transfer_to_frontend_dev(ctx: SwarmContext, reason: str = "") -> Transfer:
+    """Hand off to the Frontend Developer for React/Next.js UI work."""
     return Transfer(
-        target_routine="pixel_crafter",
+        target_routine="frontend_dev",
         context=ctx,
-        reason=reason or "Transferring to Pixel Crafter for frontend implementation.",
+        reason=reason or "Transferring to Frontend Developer for frontend implementation.",
     )
 
 
-def transfer_to_guardian(ctx: SwarmContext, reason: str = "") -> Transfer:
-    """Hand off to the Guardian (QA) for testing and code review."""
+# Alias for backward compat (do not use in new code)
+transfer_to_pixel_crafter = transfer_to_frontend_dev
+
+
+def transfer_to_qa_engineer(ctx: SwarmContext, reason: str = "") -> Transfer:
+    """Hand off to the QA Engineer for testing and code review."""
     return Transfer(
-        target_routine="guardian",
+        target_routine="qa_engineer",
         context=ctx,
-        reason=reason or "Transferring to Guardian for quality assurance.",
+        reason=reason or "Transferring to QA Engineer for quality assurance.",
     )
+
+
+# Alias for backward compat (do not use in new code)
+transfer_to_guardian = transfer_to_qa_engineer
 
 
 def transfer_to_dispatcher(ctx: SwarmContext, reason: str = "") -> Transfer:
@@ -57,12 +69,30 @@ def transfer_to_dispatcher(ctx: SwarmContext, reason: str = "") -> Transfer:
     )
 
 
+def transfer_to_uiux_researcher(ctx: SwarmContext, reason: str = "") -> Transfer:
+    """Hand off to the UI/UX Researcher for deep design research."""
+    return Transfer(
+        target_routine="uiux_researcher",
+        context=ctx,
+        reason=reason or "Transferring to UI/UX Researcher for design specification.",
+    )
+
+
+def transfer_to_code_reviewer(ctx: SwarmContext, reason: str = "") -> Transfer:
+    """Hand off to the Code Reviewer for quality gating."""
+    return Transfer(
+        target_routine="code_reviewer",
+        context=ctx,
+        reason=reason or "Transferring to Code Reviewer for quality assurance.",
+    )
+
+
 def terminate_and_report(ctx: SwarmContext, final_output: str) -> str:
     """
     Signal the Swarm to terminate and return a final answer.
 
     This is the ONLY exit point for a successful task completion.
-    Only the Guardian routine should call this after all quality checks pass.
+    Only the QA Engineer routine should call this after all quality checks pass.
 
     Parameters
     ----------

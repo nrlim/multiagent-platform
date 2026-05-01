@@ -6,7 +6,7 @@ import {
   Plus, Search, X, GripVertical, Clock, CheckCircle2,
   AlertCircle, Loader2, Edit3, Check,
   Inbox, Cpu, Play, StopCircle, Filter,
-  RefreshCw, Zap, AlertTriangle, Bug,
+  RefreshCw, Zap, AlertTriangle, Bug, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -153,14 +153,112 @@ function AddTaskModal({ onAdd, onClose }: AddTaskModalProps) {
   );
 }
 
+// ─── Simple Markdown Preview ──────────────────────────────────────────────────
+export function MarkdownPreview({ content }: { content: string }) {
+  const lines = content.split('\n');
+  return (
+    <div className="space-y-2 text-[11px] leading-relaxed text-slate-700">
+      {lines.map((line, i) => {
+        if (line.startsWith('# ')) return <h1 key={i} className="text-base font-bold mt-4 mb-2 text-slate-900">{line.slice(2)}</h1>;
+        if (line.startsWith('## ')) return <h2 key={i} className="text-sm font-bold mt-3 mb-1.5 text-slate-800">{line.slice(3)}</h2>;
+        if (line.startsWith('### ')) return <h3 key={i} className="text-xs font-bold mt-2 mb-1 text-slate-800">{line.slice(4)}</h3>;
+        if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+          const text = line.trim().substring(2);
+          return <li key={i} className="ml-4 list-disc marker:text-slate-400 pl-1">{formatBold(text)}</li>;
+        }
+        if (/^\d+\.\s/.test(line.trim())) {
+          const match = line.trim().match(/^(\d+\.)\s(.*)/);
+          return <li key={i} className="ml-4 list-decimal marker:text-slate-400 font-semibold text-slate-800 mt-2">{formatBold(match ? match[2] : line)}</li>;
+        }
+        if (line.trim() === '') return <div key={i} className="h-2" />;
+        return <p key={i}>{formatBold(line)}</p>;
+      })}
+    </div>
+  );
+}
+
+function formatBold(text: string) {
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i} className="font-bold text-slate-900">{part.slice(2, -2)}</strong>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+// ─── Task Detail Modal ────────────────────────────────────────────────────────
+interface TaskDetailModalProps {
+  task: BucketTask;
+  onClose: () => void;
+}
+
+export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
+  const pri = PRIORITY_CFG[task.priority] ?? PRIORITY_CFG.MEDIUM;
+  const sta = STATUS_CFG[task.status] ?? STATUS_CFG.PENDING;
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[400] flex items-center justify-center cmd-overlay p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 16 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 16 }}
+        transition={{ type: "spring", stiffness: 380, damping: 30 }}
+        className="glass-panel rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl shadow-black/50 overflow-hidden"
+      >
+        <div className="flex items-start justify-between px-6 py-5 border-b border-slate-200 bg-white/50 shrink-0">
+          <div className="flex gap-3">
+            <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0 mt-0.5">
+              <FileText className="w-4 h-4 text-indigo-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 leading-snug">{task.title}</h2>
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-md tracking-wide", pri.cls)}>
+                  {pri.label}
+                </span>
+                <span className={cn("flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md", sta.cls)}>
+                  <sta.Icon className={cn("w-3 h-3", sta.animate && "animate-spin")} />
+                  {sta.label}
+                </span>
+                {task.assigned_role && (
+                  <span className="text-[10px] text-indigo-700 font-semibold capitalize px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-200">
+                    {task.assigned_role.replace(/_/g, " ")}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            {task.description ? (
+              <MarkdownPreview content={task.description} />
+            ) : (
+              <p className="text-sm text-slate-500 italic">No description provided.</p>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Task Card ────────────────────────────────────────────────────────────────
 interface TaskCardProps {
   task: BucketTask;
   onDelete: (id: string) => void;
   onUpdatePriority: (id: string, p: BucketPriority) => void;
+  onViewDetails: (task: BucketTask) => void;
 }
 
-function TaskCard({ task, onDelete, onUpdatePriority }: TaskCardProps) {
+function TaskCard({ task, onDelete, onUpdatePriority, onViewDetails }: TaskCardProps) {
   const pri = PRIORITY_CFG[task.priority] ?? PRIORITY_CFG.MEDIUM;
   const sta = STATUS_CFG[task.status] ?? STATUS_CFG.PENDING;
   const StatusIcon = sta.Icon;
@@ -206,6 +304,17 @@ function TaskCard({ task, onDelete, onUpdatePriority }: TaskCardProps) {
 
       {/* Title */}
       <p className="text-xs font-medium text-slate-800 leading-snug pr-5 mb-2">{task.title}</p>
+
+      {/* Description Preview Button */}
+      {task.description && (
+        <button 
+          onClick={() => onViewDetails(task)}
+          className="mb-2.5 text-[10px] text-indigo-600 font-semibold cursor-pointer hover:text-indigo-700 hover:bg-indigo-50/80 px-2 py-1 rounded border border-indigo-100 transition-colors inline-flex items-center gap-1.5"
+        >
+          <FileText className="w-3 h-3" />
+          View Detailed Story
+        </button>
+      )}
 
       {/* Tags */}
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -371,6 +480,7 @@ export function TaskBucket({
   const [tasks,     setTasks]     = useState<BucketTask[]>([]);
   const [progress,  setProgress]  = useState<BucketProgressWithTasks | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [detailTask, setDetailTask] = useState<BucketTask | null>(null);
   const [search,    setSearch]    = useState("");
   const [filterSt,  setFilterSt]  = useState<string>("all");
   const [showFilters, setShowFilters] = useState(false);
@@ -427,6 +537,7 @@ export function TaskBucket({
         id: Math.random().toString(36).slice(2, 10),
         title, description: desc, priority,
         status: "PENDING",
+        card_type: "TASK", story_id: null,
         hive_id: null, assigned_agent_id: null, assigned_role: null,
         error_log: null, retry_count: 0, max_retries: 2,
         parent_task_id: null,
@@ -637,6 +748,7 @@ export function TaskBucket({
                 task={task}
                 onDelete={handleDeleteTask}
                 onUpdatePriority={handleUpdatePriority}
+                onViewDetails={setDetailTask}
               />
             ))
           )}
@@ -647,6 +759,13 @@ export function TaskBucket({
       <AnimatePresence>
         {showModal && (
           <AddTaskModal onAdd={handleAddTask} onClose={() => setShowModal(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* Task Detail Modal */}
+      <AnimatePresence>
+        {detailTask && (
+          <TaskDetailModal task={detailTask} onClose={() => setDetailTask(null)} />
         )}
       </AnimatePresence>
     </div>

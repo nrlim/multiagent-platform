@@ -39,6 +39,8 @@ class BucketTask:
     description: str = ""
     priority: str = "MEDIUM"          # HIGH | MEDIUM | LOW
     status: str = "PENDING"           # PENDING | IN_PROGRESS | COMPLETED | FAILED | CANCELLED
+    card_type: str = "TASK"           # STORY | TASK | BUG
+    story_id: str | None = None       # parent story id
     hive_id: str | None = None
     assigned_agent_id: str | None = None
     assigned_role: str | None = None
@@ -60,6 +62,8 @@ class BucketTask:
             description=row.get("description", ""),
             priority=row.get("priority", "MEDIUM"),
             status=row.get("status", "PENDING"),
+            card_type=row.get("card_type", "TASK"),
+            story_id=row.get("story_id"),
             hive_id=row.get("hive_id"),
             assigned_agent_id=row.get("assigned_agent_id"),
             assigned_role=row.get("assigned_role"),
@@ -77,6 +81,8 @@ class BucketTask:
             "description": self.description,
             "priority": self.priority,
             "status": self.status,
+            "card_type": self.card_type,
+            "story_id": self.story_id,
             "hive_id": self.hive_id,
             "assigned_agent_id": self.assigned_agent_id,
             "assigned_role": self.assigned_role,
@@ -128,6 +134,8 @@ class BucketQueue:
         priority: str = "MEDIUM",
         task_id: str | None = None,
         parent_task_id: str | None = None,
+        card_type: str = "TASK",
+        story_id: str | None = None,
     ) -> BucketTask:
         """Create and enqueue a new task."""
         tid = task_id or str(uuid.uuid4())
@@ -137,6 +145,8 @@ class BucketQueue:
             description=description,
             priority=priority.upper(),
             status="PENDING",
+            card_type=card_type.upper(),
+            story_id=story_id,
             parent_task_id=parent_task_id,
         )
         async with self._lock:
@@ -149,9 +159,11 @@ class BucketQueue:
             description=description,
             priority=priority.upper(),
             parent_task_id=parent_task_id,
+            card_type=card_type.upper(),
+            story_id=story_id,
         )
 
-        logger.info(f"[Bucket] Enqueued task: [{priority.upper()}] {title!r} ({tid[:8]})")
+        logger.info(f"[Bucket] Enqueued task: [{priority.upper()}][{card_type.upper()}] {title!r} ({tid[:8]})")
         self._notify()
         return task
 

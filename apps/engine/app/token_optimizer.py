@@ -104,18 +104,18 @@ def compress_history(history: list[dict]) -> list[dict]:
 _ROLE_RELEVANT_ARTIFACTS: dict[str, set[str]] = {
     "swarm_dispatcher": set(),
     "uiux_scout":       {"api_spec"},
-    "logic_weaver":     {"database_schema", "design_spec"},
-    "pixel_crafter":    {"design_spec", "api_spec"},
-    "guardian":         {"design_spec", "api_spec", "database_schema"},
+    "backend_dev":     {"database_schema", "design_spec"},
+    "frontend_dev":    {"design_spec", "api_spec"},
+    "qa_engineer":         {"design_spec", "api_spec", "database_schema"},
 }
 
 # Which context_variables are relevant for each routine
 _ROLE_RELEVANT_VARS: dict[str, set[str]] = {
     "swarm_dispatcher": set(),
     "uiux_scout":       {"api_spec"},
-    "logic_weaver":     {"database_schema"},
-    "pixel_crafter":    {"design_spec", "api_spec"},
-    "guardian":         {"design_spec", "api_spec", "database_schema"},
+    "backend_dev":     {"database_schema"},
+    "frontend_dev":    {"design_spec", "api_spec"},
+    "qa_engineer":         {"design_spec", "api_spec", "database_schema"},
 }
 
 
@@ -184,13 +184,13 @@ _DISPATCH_RULES: list[tuple[list[str], str]] = [
       "user journey", "design spec", "figma", "prototype"], "uiux_scout"),
     # Frontend keywords → pixel_crafter
     (["react", "next.js", "nextjs", "component", "frontend", "ui component",
-      "page layout", "css", "tailwind", "atomic design", "tsx", "jsx"], "pixel_crafter"),
+      "page layout", "css", "tailwind", "atomic design", "tsx", "jsx"], "frontend_dev"),
     # QA/Testing/Review keywords → guardian
     (["test", "qa", "quality assurance", "bug fix", "review", "debugging",
-      "unit test", "integration test", "e2e", "playwright", "pytest"], "guardian"),
+      "unit test", "integration test", "e2e", "playwright", "pytest"], "qa_engineer"),
     # Backend/API/DB keywords → logic_weaver (default fallback)
     (["api", "backend", "database", "sql", "endpoint", "server", "migration",
-      "auth", "authentication", "service layer", "crud", "rest"], "logic_weaver"),
+      "auth", "authentication", "service layer", "crud", "rest"], "backend_dev"),
 ]
 
 

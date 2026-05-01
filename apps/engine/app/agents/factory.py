@@ -2,8 +2,8 @@
 AgentHive Engine - Provider Factory
 Creates the correct agent based on the provider string from config or request.
 """
-from app.agents.base import BaseAgent, LogEmitter
 from app import config
+from app.agents.base import BaseAgent, LogEmitter
 
 
 def create_agent(
@@ -15,7 +15,7 @@ def create_agent(
     Factory function to instantiate the correct agent for a given provider.
 
     Args:
-        provider: One of 'google', 'openai', 'anthropic', 'deepseek'. Defaults to env PROVIDER.
+        provider: One of 'google', 'openai', 'anthropic', 'deepseek', 'kimi'. Defaults to env PROVIDER.
         model: Optional model override. Defaults to provider's default model.
         log_emitter: Callback for log events. Signature: (level: str, message: str) -> None
 
@@ -43,8 +43,12 @@ def create_agent(
         from app.agents.deepseek_agent import DeepSeekAgent
         return DeepSeekAgent(model=model, log_emitter=log_emitter)
 
+    elif resolved_provider == "kimi":
+        from app.agents.kimi_agent import KimiAgent
+        return KimiAgent(model=model, log_emitter=log_emitter)
+
     else:
-        supported = ["google", "openai", "anthropic", "deepseek"]
+        supported = ["google", "openai", "anthropic", "deepseek", "kimi"]
         raise ValueError(
             f"Unsupported provider '{resolved_provider}'. "
             f"Must be one of: {supported}"
@@ -77,5 +81,11 @@ def get_available_providers() -> list[dict]:
             "label": "DeepSeek",
             "configured": bool(config.DEEPSEEK_API_KEY),
             "defaultModel": config.DEEPSEEK_MODEL,
+        },
+        {
+            "id": "kimi",
+            "label": "Kimi (Moonshot AI)",
+            "configured": bool(config.KIMI_API_KEY),
+            "defaultModel": config.KIMI_MODEL,
         },
     ]

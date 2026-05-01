@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Network, Play, Pause, X, ChevronRight,
@@ -520,26 +520,37 @@ export default function OrchestrationPage() {
   const doneCnt    = hiveAgents.filter(a => a.status === "completed").length;
   const tokenStats = agentCount > 0 ? { tokens: tokenEst, cost: costEst, agentCount, doneCount: doneCnt } : undefined;
 
-  // Collect HANDOFF events and expire them after 3s
-  useMemo(() => {
-    const newHandoffs = wsEvents
-      .filter(e => e.event_type === "HANDOFF")
-      .slice(-5) // only keep last 5
-      .map(e => {
+  // Collect new HANDOFF events and auto-expire them after 3s
+  const processedHandoffs = useRef<Set<string>>(
+    new Set(wsEvents.filter(e => e.event_type === "HANDOFF").map(e => e.id))
+  );
+
+  useEffect(() => {
+    const unseen = wsEvents.filter(
+      e => e.event_type === "HANDOFF" && !processedHandoffs.current.has(e.id)
+    );
+
+    if (unseen.length > 0) {
+      const newHandoffs = unseen.map((e, i) => {
+        processedHandoffs.current.add(e.id);
         const d = (typeof e.data === "object" ? e.data : {}) as Record<string, unknown>;
         return {
-          id: e.id,
+          id: `${e.id}-${Date.now()}-${i}`, // Ensure strictly unique key
           fromRole: String(d.from_role ?? ""),
           toRole: String(d.to_role ?? ""),
           startedAt: Date.now(),
         };
       });
-    if (newHandoffs.length > 0) {
-      setHandoffPulses(newHandoffs);
-      const timer = setTimeout(() => setHandoffPulses([]), 3000);
-      return () => clearTimeout(timer);
+
+      setHandoffPulses(prev => [...prev, ...newHandoffs].slice(-5));
+
+      newHandoffs.forEach(h => {
+        setTimeout(() => {
+          setHandoffPulses(prev => prev.filter(p => p.id !== h.id));
+        }, 3000);
+      });
     }
-  }, [wsEvents]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [wsEvents]);
 
   const handleHiveExecute = async (
     prompt: string, prov: string, model: string,
@@ -728,7 +739,7 @@ export default function OrchestrationPage() {
 
         {/* ── CENTER: Graph Canvas ─────────────────────────────────────────── */}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
-          <div className="flex-1 min-h-0 relative">
+          <div className="flex-1 relative w-full h-full" style={{ minHeight: 0 }}>
             <AgentGraph
               agents={hiveAgents}
               thoughts={thoughts}

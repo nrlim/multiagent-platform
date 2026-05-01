@@ -6,6 +6,12 @@ and Redis connection on startup.
 from __future__ import annotations
 
 import asyncio
+import sys
+
+if sys.platform == "win32":
+    # Prevent "ValueError: too many file descriptors in select()" on Windows
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 import json
 import uuid
 from contextlib import asynccontextmanager
@@ -90,6 +96,19 @@ async def lifespan(app: FastAPI):
 
     # Try Redis
     await event_bus.connect_redis()
+
+    # Sync configuration from Database
+    try:
+        db_config = await db_get_system_settings()
+        if db_config.get("google_key"): config.GOOGLE_API_KEY = db_config["google_key"]
+        if db_config.get("openai_key"): config.OPENAI_API_KEY = db_config["openai_key"]
+        if db_config.get("anthropic_key"): config.ANTHROPIC_API_KEY = db_config["anthropic_key"]
+        if db_config.get("deepseek_key"): config.DEEPSEEK_API_KEY = db_config["deepseek_key"]
+        if db_config.get("kimi_key"): config.KIMI_API_KEY = db_config["kimi_key"]
+        if db_config.get("budget_limit"): config.BUDGET_LIMIT = db_config["budget_limit"]
+        print("System settings synced from database")
+    except Exception as e:
+        print(f"Failed to sync settings from DB: {e}")
 
     # Load task bucket from DB (best-effort — no-ops if DB unavailable)
     await bucket_queue.load_from_db()
@@ -578,6 +597,78 @@ async def read_workspace_file(path: str, hive_id: str | None = None):
     return PlainTextResponse(result.get("content", ""))
 
 
+class FileSaveRequest(BaseModel):
+    path: str
+    content: str
+    hive_id: str | None = None
+
+
+@app.put("/workspace/file", tags=["Workspace"])
+async def save_workspace_file(req: FileSaveRequest):
+    """Save (overwrite) a file in the session workspace."""
+    if req.hive_id:
+        session_dir = None
+        for prefix in ("hive", "session"):
+            d = config.WORKSPACE_DIR / f"{prefix}-{req.hive_id[:8]}"
+            if d.exists():
+                session_dir = d
+                break
+        if session_dir is None:
+            raise HTTPException(status_code=404, detail="Session workspace not found")
+    else:
+        session_dir = config.WORKSPACE_DIR
+
+    # Resolve the target path safely (prevent path traversal)
+    target = (session_dir / req.path).resolve()
+    if not str(target).startswith(str(session_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(req.content, encoding="utf-8")
+        return {"success": True, "path": req.path, "bytes": len(req.content.encode("utf-8"))}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class FileRenameRequest(BaseModel):
+    old_path: str
+    new_path: str
+    hive_id: str | None = None
+
+@app.post("/workspace/file/rename", tags=["Workspace"])
+async def rename_workspace_file(req: FileRenameRequest):
+    """Rename a file or directory in the session workspace."""
+    if req.hive_id:
+        session_dir = None
+        for prefix in ("hive", "session"):
+            d = config.WORKSPACE_DIR / f"{prefix}-{req.hive_id[:8]}"
+            if d.exists():
+                session_dir = d
+                break
+        if session_dir is None:
+            raise HTTPException(status_code=404, detail="Session workspace not found")
+    else:
+        session_dir = config.WORKSPACE_DIR
+
+    target_old = (session_dir / req.old_path).resolve()
+    target_new = (session_dir / req.new_path).resolve()
+
+    if not str(target_old).startswith(str(session_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+    if not str(target_new).startswith(str(session_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+
+    if not target_old.exists():
+        raise HTTPException(status_code=404, detail="Original file not found")
+
+    try:
+        target_new.parent.mkdir(parents=True, exist_ok=True)
+        target_old.rename(target_new)
+        return {"success": True, "old_path": req.old_path, "new_path": req.new_path}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
 @app.get("/workspace/{session_id}", tags=["Workspace"])
 async def get_session_workspace(session_id: str):
     for prefix in ("hive", "session"):
@@ -697,7 +788,228 @@ def _count_files(nodes: list) -> int:
     return total
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── Workspace Runner ──────────────────────────────────────────────────────────
+import subprocess
+import threading
+import queue
+
+# Active runner processes: hive_id → subprocess
+_runner_processes: dict[str, subprocess.Popen] = {}
+
+
+class WorkspaceRunRequest(BaseModel):
+    port: int = Field(default=4000, ge=3000, le=9999)
+
+
+from fastapi import Query
+
+@app.get("/workspace/{hive_id}/run", tags=["Workspace"])
+async def run_workspace(hive_id: str, port: int = Query(4000, ge=3000, le=9999)):
+    """
+    Detect project type in the session workspace, install dependencies,
+    and start the dev server. Streams stdout/stderr lines via SSE.
+    """
+    session_dir: Path | None = None
+    for prefix in ("hive", "session"):
+        d = config.WORKSPACE_DIR / f"{prefix}-{hive_id[:8]}"
+        if d.exists():
+            session_dir = d
+            break
+    if session_dir is None:
+        raise HTTPException(status_code=404, detail="Session workspace not found")
+
+    async def _run_stream():
+        yield {"event": "log", "data": json.dumps({"line": f"📂 Workspace: {session_dir}", "level": "info"})}
+
+        # ── Detect project type ──────────────────────────────────────────────
+        has_package_json = (session_dir / "package.json").exists()
+        has_pyproject    = (session_dir / "pyproject.toml").exists()
+        has_requirements = (session_dir / "requirements.txt").exists()
+        has_next_config  = (session_dir / "next.config.js").exists() or (session_dir / "next.config.ts").exists()
+
+        if has_package_json:
+            pkg_mgr = "pnpm" if (session_dir / "pnpm-lock.yaml").exists() else "npm"
+            install_cmd  = [pkg_mgr, "install"]
+            dev_cmd      = [pkg_mgr, "run", "dev", "--", f"--port={port}"] if has_next_config else [pkg_mgr, "run", "dev"]
+            project_type = "Node.js / Next.js"
+        elif has_pyproject:
+            install_cmd  = ["poetry", "install"]
+            dev_cmd      = ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", str(port), "--reload"]
+            project_type = "Python (Poetry)"
+        elif has_requirements:
+            install_cmd  = ["pip", "install", "-r", "requirements.txt"]
+            dev_cmd      = ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", str(port), "--reload"]
+            project_type = "Python"
+        else:
+            yield {"event": "error", "data": json.dumps({"line": "❌ No package.json or pyproject.toml found", "level": "error"})}
+            yield {"event": "done", "data": json.dumps({"success": False})}
+            return
+
+        yield {"event": "log", "data": json.dumps({"line": f"🔍 Detected: {project_type}", "level": "info"})}
+
+        # ── Stop any existing runner ──────────────────────────────────────────
+        old = _runner_processes.pop(hive_id, None)
+        if old:
+            try:
+                old.terminate()
+            except Exception:
+                pass
+
+        # ── Install dependencies ──────────────────────────────────────────────
+        yield {"event": "log", "data": json.dumps({"line": f"📦 Installing: {' '.join(install_cmd)}", "level": "info"})}
+        try:
+            cmd_str = " ".join(install_cmd)
+            q_install = queue.Queue()
+            
+            def _install_worker():
+                try:
+                    import os, copy
+                    env = copy.copy(os.environ)
+                    env["FORCE_COLOR"] = "0"
+                    env["NPM_CONFIG_PROGRESS"] = "true"
+                    env["NPM_CONFIG_LOGLEVEL"] = "http"
+                    p = subprocess.Popen(
+                        cmd_str, shell=True, cwd=str(session_dir),
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1, errors="replace", env=env
+                    )
+                    for line in p.stdout:
+                        q_install.put({"type": "log", "line": line.rstrip()})
+                    p.wait()
+                    q_install.put({"type": "done", "returncode": p.returncode})
+                except Exception as e:
+                    q_install.put({"type": "error", "error": repr(e)})
+            
+            install_thread = threading.Thread(target=_install_worker, daemon=True)
+            install_thread.start()
+            
+            import time
+            last_ping = time.time()
+            install_start = time.time()
+            
+            while True:
+                try:
+                    msg = await asyncio.to_thread(q_install.get, True, 0.5)
+                except queue.Empty:
+                    # Send keep-alive every 5 seconds to prevent Next.js proxy timeout
+                    now = time.time()
+                    if now - last_ping > 5.0:
+                        yield {"event": "ping", "data": "{}"}
+                        # Print a dot to the console every 15s to show it's not frozen
+                        if int(now - install_start) % 15 == 0:
+                            yield {"event": "log", "data": json.dumps({"line": "⏳ Masih menginstall... (please wait)", "level": "info"})}
+                        last_ping = now
+                    continue
+                
+                if msg["type"] == "log":
+                    if msg["line"]:
+                        yield {"event": "log", "data": json.dumps({"line": msg["line"], "level": "info"})}
+                elif msg["type"] == "done":
+                    if msg["returncode"] != 0:
+                        yield {"event": "error", "data": json.dumps({"line": f"❌ Install failed (code {msg['returncode']})", "level": "error"})}
+                        yield {"event": "done", "data": json.dumps({"success": False})}
+                        return
+                    break
+                elif msg["type"] == "error":
+                    yield {"event": "error", "data": json.dumps({"line": f"❌ Install error: {msg['error']}", "level": "error"})}
+                    yield {"event": "done", "data": json.dumps({"success": False})}
+                    return
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            yield {"event": "error", "data": json.dumps({"line": f"❌ Install exception ({type(exc).__name__}): {repr(exc)}", "level": "error"})}
+            yield {"event": "done", "data": json.dumps({"success": False})}
+            return
+
+        # ── Start dev server ──────────────────────────────────────────────────
+        yield {"event": "log", "data": json.dumps({"line": f"🚀 Starting: {' '.join(dev_cmd)}", "level": "info"})}
+        yield {"event": "log", "data": json.dumps({"line": f"🌐 Will be available at http://localhost:{port}", "level": "success"})}
+        try:
+            cmd_str = " ".join(dev_cmd)
+            proc = subprocess.Popen(
+                cmd_str, shell=True, cwd=str(session_dir),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, errors="replace"
+            )
+            _runner_processes[hive_id] = proc
+            yield {"event": "started", "data": json.dumps({"port": port, "url": f"http://localhost:{port}"})}
+
+            q_dev = queue.Queue()
+            def _dev_worker(p):
+                try:
+                    for line in p.stdout:
+                        q_dev.put({"type": "log", "line": line.rstrip()})
+                    p.wait()
+                    q_dev.put({"type": "done", "returncode": p.returncode})
+                except Exception as e:
+                    q_dev.put({"type": "error", "error": repr(e)})
+            
+            dev_thread = threading.Thread(target=_dev_worker, args=(proc,), daemon=True)
+            dev_thread.start()
+
+            import time
+            last_ping = time.time()
+
+            while True:
+                try:
+                    msg = await asyncio.to_thread(q_dev.get, True, 0.5)
+                except queue.Empty:
+                    now = time.time()
+                    if now - last_ping > 5.0:
+                        yield {"event": "ping", "data": "{}"}
+                        last_ping = now
+                    continue
+                
+                if msg["type"] == "log":
+                    line = msg["line"]
+                    if line:
+                        yield {"event": "log", "data": json.dumps({"line": line, "level": "info"})}
+                    if any(k in line.lower() for k in ["ready", "listening on", "started server", "local:"]):
+                        yield {"event": "ready", "data": json.dumps({"url": f"http://localhost:{port}"})}
+                elif msg["type"] == "done":
+                    break
+                elif msg["type"] == "error":
+                    yield {"event": "error", "data": json.dumps({"line": f"❌ Server process error: {msg['error']}", "level": "error"})}
+                    break
+
+        except asyncio.CancelledError:
+            if 'proc' in locals():
+                proc.terminate()
+            raise
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            yield {"event": "error", "data": json.dumps({"line": f"❌ Server error ({type(exc).__name__}): {repr(exc)}", "level": "error"})}
+
+        yield {"event": "done", "data": json.dumps({"success": True})}
+
+    return EventSourceResponse(_run_stream())
+
+
+@app.delete("/workspace/{hive_id}/run", tags=["Workspace"])
+async def stop_workspace(hive_id: str):
+    """Stop the dev server for a hive workspace."""
+    proc = _runner_processes.pop(hive_id, None)
+    if proc:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        return {"hive_id": hive_id, "stopped": True}
+    return {"hive_id": hive_id, "stopped": False}
+
+
+@app.get("/workspace/{hive_id}/run/status", tags=["Workspace"])
+async def run_status(hive_id: str):
+    """Check if a dev server is running for the given hive."""
+    proc = _runner_processes.get(hive_id)
+    running = proc is not None and proc.returncode is None
+    return {"hive_id": hive_id, "running": running}
+
+
 #  PHASE 5 — Self-Healing Controls, QA, Budget, Human-in-the-loop
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -974,6 +1286,7 @@ class SystemSettingsUpdate(BaseModel):
     openai_key: str | None = None
     anthropic_key: str | None = None
     deepseek_key: str | None = None
+    kimi_key: str | None = None
     budget_limit: float | None = None
     run_qa: bool | None = None
     require_review: bool | None = None
@@ -998,12 +1311,14 @@ async def get_system_settings():
     frontend_settings["openai_key_set"] = bool(settings.get("openai_key"))
     frontend_settings["anthropic_key_set"] = bool(settings.get("anthropic_key"))
     frontend_settings["deepseek_key_set"] = bool(settings.get("deepseek_key"))
+    frontend_settings["kimi_key_set"] = bool(settings.get("kimi_key"))
     
     # Overwrite actual plaintext keys in response
     frontend_settings["google_key"] = ""
     frontend_settings["openai_key"] = ""
     frontend_settings["anthropic_key"] = ""
     frontend_settings["deepseek_key"] = ""
+    frontend_settings["kimi_key"] = ""
 
     return frontend_settings
 
@@ -1014,7 +1329,7 @@ async def update_system_settings(data: SystemSettingsUpdate):
     update_data = {k: v for k, v in data.dict().items() if v is not None}
     
     # Don't update keys if they are passed as empty or mask strings
-    for k in ["google_key", "openai_key", "anthropic_key", "deepseek_key"]:
+    for k in ["google_key", "openai_key", "anthropic_key", "deepseek_key", "kimi_key"]:
         if k in update_data and (not update_data[k] or "*" in update_data[k]):
             del update_data[k]
             
@@ -1029,6 +1344,8 @@ async def update_system_settings(data: SystemSettingsUpdate):
         config.ANTHROPIC_API_KEY = update_data["anthropic_key"]
     if "deepseek_key" in update_data:
         config.DEEPSEEK_API_KEY = update_data["deepseek_key"]
+    if "kimi_key" in update_data:
+        config.KIMI_API_KEY = update_data["kimi_key"]
         
     return {"status": "ok", "message": "Settings updated safely"}
 

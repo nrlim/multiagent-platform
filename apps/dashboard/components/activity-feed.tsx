@@ -53,6 +53,8 @@ function extractText(event: HiveEvent): string {
     case "SHELL_OUTPUT": return String(d.line ?? "");
     case "FILE_CHANGE": return `${d.op} ${d.path}${d.size ? ` (${d.size}b)` : ""}`;
     case "ARTIFACT": return `Published [${d.topic}] to message bus`;
+    case "CHAT":    return String(d.text ?? "");
+    case "HANDOFF": return `Transfer: ${d.from_role} → ${d.to_role}${d.reason ? ` (${d.reason})` : ""}`;
     case "DONE":    return d.success ? "Hive session completed successfully" : `Failed: ${(d.failed as string[])?.join(", ")}`;
     case "ERROR":   return String(d.error ?? "Unknown error");
     default: return JSON.stringify(event.data).slice(0, 120);

@@ -27,22 +27,22 @@ type RoleCfg = {
   label: string;
 };
 const ROLE_CONFIG: Record<string, RoleCfg> = {
-  manager:            { icon: Brain,        accentColor: "#6366f1", borderColor: "border-indigo-600/50",   glowColor: "#6366f1", label: "Manager" },
-  business_analyst:   { icon: LineChart,    accentColor: "#14b8a6", borderColor: "border-teal-500/50",    glowColor: "#14b8a6", label: "Business Analyst" },
-  database_architect: { icon: Database,     accentColor: "#0ea5e9", borderColor: "border-sky-600/50",     glowColor: "#0ea5e9", label: "DB Architect" },
-  backend_dev:        { icon: Server,       accentColor: "#10b981", borderColor: "border-emerald-600/50", glowColor: "#10b981", label: "Backend Dev" },
-  frontend_dev:       { icon: Globe,        accentColor: "#f59e0b", borderColor: "border-amber-500/50",   glowColor: "#f59e0b", label: "Frontend Dev" },
-  uiux_researcher:    { icon: Palette,      accentColor: "#a855f7", borderColor: "border-purple-500/50",  glowColor: "#a855f7", label: "UI/UX Researcher" },
-  code_reviewer:      { icon: ShieldCheck,  accentColor: "#3b82f6", borderColor: "border-blue-500/50",    glowColor: "#3b82f6", label: "Code Reviewer" },
-  qa_engineer:        { icon: FlaskConical, accentColor: "#ec4899", borderColor: "border-pink-600/50",    glowColor: "#ec4899", label: "QA Engineer" },
-  devops_engineer:    { icon: Code2,        accentColor: "#64748b", borderColor: "border-slate-500/50",   glowColor: "#64748b", label: "DevOps" },
-  tech_writer:        { icon: FileText,     accentColor: "#a78bfa", borderColor: "border-violet-500/50",  glowColor: "#a78bfa", label: "Tech Writer" },
+  manager: { icon: Brain, accentColor: "#6366f1", borderColor: "border-indigo-600/50", glowColor: "#6366f1", label: "Project Manager" },
+  business_analyst: { icon: LineChart, accentColor: "#14b8a6", borderColor: "border-teal-500/50", glowColor: "#14b8a6", label: "Business Analyst" },
+  database_architect: { icon: Database, accentColor: "#0ea5e9", borderColor: "border-sky-600/50", glowColor: "#0ea5e9", label: "DB Architect" },
+  backend_dev: { icon: Server, accentColor: "#10b981", borderColor: "border-emerald-600/50", glowColor: "#10b981", label: "Backend Engineer" },
+  frontend_dev: { icon: Globe, accentColor: "#f59e0b", borderColor: "border-amber-500/50", glowColor: "#f59e0b", label: "Frontend Engineer" },
+  uiux_researcher: { icon: Palette, accentColor: "#a855f7", borderColor: "border-purple-500/50", glowColor: "#a855f7", label: "Design Researcher" },
+  code_reviewer: { icon: ShieldCheck, accentColor: "#3b82f6", borderColor: "border-blue-500/50", glowColor: "#3b82f6", label: "Code Reviewer" },
+  qa_engineer: { icon: FlaskConical, accentColor: "#ec4899", borderColor: "border-pink-600/50", glowColor: "#ec4899", label: "QA Engineer" },
+  devops_engineer: { icon: Code2, accentColor: "#64748b", borderColor: "border-slate-500/50", glowColor: "#64748b", label: "DevOps" },
+  tech_writer: { icon: FileText, accentColor: "#a78bfa", borderColor: "border-violet-500/50", glowColor: "#a78bfa", label: "Tech Writer" },
   // ── Swarm Routine roles ───────────────────────────────────────────────────
-  swarm_dispatcher:   { icon: Brain,        accentColor: "#818cf8", borderColor: "border-indigo-500/50",  glowColor: "#818cf8", label: "Dispatcher" },
-  uiux_scout:         { icon: Palette,      accentColor: "#c084fc", borderColor: "border-purple-400/50",  glowColor: "#c084fc", label: "UI/UX Scout" },
-  logic_weaver:       { icon: Server,       accentColor: "#34d399", borderColor: "border-emerald-400/50", glowColor: "#34d399", label: "Logic Weaver" },
-  pixel_crafter:      { icon: Globe,        accentColor: "#fbbf24", borderColor: "border-amber-400/50",   glowColor: "#fbbf24", label: "Pixel Crafter" },
-  guardian:           { icon: ShieldCheck,  accentColor: "#f472b6", borderColor: "border-pink-400/50",    glowColor: "#f472b6", label: "Guardian" },
+  swarm_dispatcher: { icon: Brain, accentColor: "#818cf8", borderColor: "border-indigo-500/50", glowColor: "#818cf8", label: "Project Manager" },
+  uiux_scout: { icon: Palette, accentColor: "#c084fc", borderColor: "border-purple-400/50", glowColor: "#c084fc", label: "UX Designer" },
+  logic_weaver: { icon: Server, accentColor: "#34d399", borderColor: "border-emerald-400/50", glowColor: "#34d399", label: "Backend Engineer" },
+  pixel_crafter: { icon: Globe, accentColor: "#fbbf24", borderColor: "border-amber-400/50", glowColor: "#fbbf24", label: "Frontend Engineer" },
+  guardian: { icon: ShieldCheck, accentColor: "#f472b6", borderColor: "border-pink-400/50", glowColor: "#f472b6", label: "QA Lead" },
 };
 
 /** Resolve a RoleCfg — always use the real role name for unknown roles, never "Worker" */
@@ -53,28 +53,57 @@ function getRoleCfg(role: string): RoleCfg {
   return { icon: User, accentColor: "#475569", borderColor: "border-slate-600/40", glowColor: "#475569", label };
 }
 
+// ─── Agent name generator ─────────────────────────────────────────────────────
+// Generates a deterministic, realistic name from agent ID + role.
+const AGENT_NAMES: Record<string, string[]> = {
+  manager: ["Alex", "Jordan", "Sam", "Riley", "Morgan"],
+  business_analyst: ["Priya", "Chris", "Dana", "Robin", "Casey"],
+  database_architect: ["Zara", "Leo", "Mia", "Ivan", "Nadia"],
+  backend_dev: ["Kai", "Ethan", "Lena", "Omar", "Sasha"],
+  frontend_dev: ["Luna", "Noah", "Aria", "Finn", "Zoe"],
+  uiux_researcher: ["Maya", "Cleo", "Theo", "Isla", "Ravi"],
+  code_reviewer: ["Marcus", "Yuki", "Aiden", "Vera", "Tobias"],
+  qa_engineer: ["Rex", "Amara", "Eli", "Sage", "Jin"],
+  devops_engineer: ["Axel", "Nora", "Cyrus", "Demi", "Felix"],
+  tech_writer: ["Quinn", "Erin", "Hana", "Beau", "Tara"],
+  swarm_dispatcher: ["Orion", "Lyra", "Atlas", "Nova", "Zephyr"],
+  uiux_scout: ["Iris", "Ciel", "Muse", "Aurora", "Pixel"],
+  logic_weaver: ["Forge", "Nexus", "Cipher", "Arc", "Byte"],
+  pixel_crafter: ["Blaze", "Flux", "Prism", "Wave", "Glow"],
+  guardian: ["Shield", "Bastion", "Aegis", "Vance", "Sentinel"],
+};
+
+function getAgentName(agentId: string, role: string): string {
+  const pool = AGENT_NAMES[role] ?? ["Agent"];
+  // Seeded by last 4 chars of id for determinism
+  const seed = parseInt(agentId.replace(/-/g, "").slice(-4), 16);
+  return pool[seed % pool.length];
+}
+
 
 // ─── Status config ────────────────────────────────────────────────────────────
 type StatusCfg = { dot: string; badge: string; badgeText: string; animate: boolean };
 const STATUS_MAP: Record<AgentStatus, StatusCfg> = {
-  idle:      { dot: "bg-slate-300",    badge: "bg-slate-50 border-slate-200 text-slate-500",        badgeText: "Queued",  animate: false },
-  thinking:  { dot: "bg-indigo-400",  badge: "bg-indigo-50 border-indigo-200 text-indigo-700", badgeText: "Active",  animate: true  },
-  working:   { dot: "bg-emerald-400", badge: "bg-amber-50 border-amber-200 text-amber-700", badgeText: "Working", animate: true  },
-  fixing:    { dot: "bg-rose-400",   badge: "bg-rose-50 border-rose-200 text-rose-700",  badgeText: "Fixing",  animate: true  },
-  completed: { dot: "bg-emerald-400", badge: "bg-emerald-50 border-emerald-200 text-emerald-700", badgeText: "Done",   animate: false },
-  error:     { dot: "bg-red-400",     badge: "bg-red-50 border-red-200 text-red-700",        badgeText: "Error",   animate: false },
+  idle: { dot: "bg-slate-300", badge: "bg-slate-50 border-slate-200 text-slate-500", badgeText: "Queued", animate: false },
+  thinking: { dot: "bg-indigo-400", badge: "bg-indigo-50 border-indigo-200 text-indigo-700", badgeText: "Active", animate: true },
+  working: { dot: "bg-emerald-400", badge: "bg-amber-50 border-amber-200 text-amber-700", badgeText: "Working", animate: true },
+  fixing: { dot: "bg-rose-400", badge: "bg-rose-50 border-rose-200 text-rose-700", badgeText: "Fixing", animate: true },
+  completed: { dot: "bg-emerald-400", badge: "bg-emerald-50 border-emerald-200 text-emerald-700", badgeText: "Done", animate: false },
+  error: { dot: "bg-red-400", badge: "bg-red-50 border-red-200 text-red-700", badgeText: "Error", animate: false },
 };
 
 // ─── Custom React Flow Node ────────────────────────────────────────────────────
 interface AgentNodeData extends Record<string, unknown> {
   agent: AgentNode;
+  agentName: string;
   thought?: string;
   toolCall?: string;
   focused?: boolean;
-  isPreparing?: boolean;    // shimmer pre-spawn state
-  isNewlySpawned?: boolean; // first appearance — triggers entry animation
-  activeTaskTitle?: string; // injected from bucket tasks
+  isPreparing?: boolean;
+  isNewlySpawned?: boolean;
+  activeTaskTitle?: string;
   isManagerPulsing?: boolean;
+  agentProgress?: number;      // 0-100, undefined = indeterminate
   onFocus?: (id: string) => void;
 }
 
@@ -141,22 +170,41 @@ function PrepareShimmer({ role }: { role: RoleCfg }) {
 
 function AgentFlowNode({ data }: { data: AgentNodeData }) {
   const {
-    agent, thought, toolCall, focused, onFocus,
-    isPreparing, isNewlySpawned, activeTaskTitle, isManagerPulsing,
+    agent, agentName, thought, toolCall, focused, onFocus,
+    isPreparing, isNewlySpawned, activeTaskTitle, isManagerPulsing, agentProgress,
   } = data;
-  const role    = getRoleCfg(agent.role);
+  
+  const [simProgress, setSimProgress] = useState(0);
+  const role = getRoleCfg(agent.role);
   const RoleIcon = role.icon;
-  const s       = STATUS_MAP[agent.status] ?? STATUS_MAP.idle;
+  const s = STATUS_MAP[agent.status] ?? STATUS_MAP.idle;
   const isActive = agent.status === "thinking" || agent.status === "working";
-  const isDone   = agent.status === "completed";
-  const isError  = agent.status === "error";
-  const isManager = agent.role === "manager";
+  const isDone = agent.status === "completed";
+  const isError = agent.status === "error";
+  const isManager = agent.role === "manager" || agent.role === "swarm_dispatcher";
+
+  useEffect(() => {
+    if (!isActive) {
+      if (isDone) setSimProgress(100);
+      return;
+    }
+    const interval = setInterval(() => {
+      setSimProgress((prev) => {
+        const step = prev < 30 ? 6 : prev < 60 ? 3 : prev < 85 ? 1 : 0.2;
+        const next = prev + step;
+        return next >= 98 ? 98 : next;
+      });
+    }, 600);
+    return () => clearInterval(interval);
+  }, [isActive, isDone]);
+
+  const displayProgress = agentProgress !== undefined ? agentProgress : Math.floor(simProgress);
 
   // Status-driven border color: Green=active/done, Grey=idle, Red=error
-  const borderColor = isError   ? "#ef4444"
-                    : isDone    ? "#10b981"
-                    : isActive  ? "#10b981"
-                    :             "#e2e8f0";
+  const borderColor = isError ? "#ef4444"
+    : isDone ? "#10b981"
+      : isActive ? "#10b981"
+        : "#e2e8f0";
   const nodeStyle: React.CSSProperties = {
     borderColor,
     boxShadow: isManagerPulsing && isManager
@@ -232,9 +280,12 @@ function AgentFlowNode({ data }: { data: AgentNodeData }) {
         <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <RoleIcon className="w-3 h-3 shrink-0" style={{ color: role.accentColor }} />
-            <span className="text-[10px] font-bold tracking-widest uppercase text-slate-500 truncate">
-              {role.label}
-            </span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[11px] font-bold text-slate-800 truncate">{agentName}</span>
+              <span className="text-[9px] font-semibold tracking-widest uppercase truncate" style={{ color: role.accentColor }}>
+                {role.label}
+              </span>
+            </div>
           </div>
           {/* Status badge */}
           <span className={cn(
@@ -249,16 +300,16 @@ function AgentFlowNode({ data }: { data: AgentNodeData }) {
                 transition={{ duration: 1, repeat: Infinity }}
               />
             )}
-            {isDone  && <CheckCircle2 className="inline w-2.5 h-2.5 mr-0.5 align-middle" />}
-            {isError && <XCircle      className="inline w-2.5 h-2.5 mr-0.5 align-middle" />}
+            {isDone && <CheckCircle2 className="inline w-2.5 h-2.5 mr-0.5 align-middle" />}
+            {isError && <XCircle className="inline w-2.5 h-2.5 mr-0.5 align-middle" />}
             {s.badgeText}
           </span>
         </div>
 
         {/* Body */}
-        <div className="px-3 py-2.5 space-y-2">
+        <div className="px-3 py-2 space-y-2">
           <span className="text-[9px] font-mono text-slate-400 tracking-wide">
-            #{agent.id.slice(0, 8)}
+            #{agent.id.slice(0, 6)}
           </span>
 
           {/* Active task badge (from bucket) */}
@@ -323,15 +374,36 @@ function AgentFlowNode({ data }: { data: AgentNodeData }) {
           </AnimatePresence>
         </div>
 
-        {/* Progress shimmer at bottom when active */}
+        {/* Progress bar — shows numeric percentage */}
         {isActive && (
-          <div className="h-px w-full overflow-hidden bg-white">
-            <motion.div
-              className="h-full"
-              style={{ background: `linear-gradient(90deg, transparent, ${role.accentColor}, transparent)` }}
-              animate={{ x: ["-100%", "200%"] }}
-              transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }}
-            />
+          <div className="px-3 pb-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[9px] text-slate-400 font-medium">Progress</span>
+              <motion.span
+                key={displayProgress}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="text-[9px] font-bold font-mono"
+                style={{ color: role.accentColor }}
+              >
+                {displayProgress}%
+              </motion.span>
+            </div>
+            <div className="h-1 w-full rounded-full bg-slate-100 overflow-hidden">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ background: role.accentColor }}
+                animate={{ width: `${displayProgress}%` }}
+                transition={{ type: "spring", stiffness: 60 }}
+              />
+            </div>
+          </div>
+        )}
+        {isDone && (
+          <div className="px-3 pb-2">
+            <div className="h-1 w-full rounded-full overflow-hidden" style={{ background: `${role.accentColor}30` }}>
+              <div className="h-full rounded-full w-full" style={{ background: role.accentColor }} />
+            </div>
           </div>
         )}
       </motion.div>
@@ -394,7 +466,7 @@ function HandoffPulseOverlay({ pulses, agents }: {
     <>
       {pulses.map((pulse) => {
         const fromCfg = getRoleCfg(pulse.fromRole);
-        const toCfg   = getRoleCfg(pulse.toRole);
+        const toCfg = getRoleCfg(pulse.toRole);
         return (
           <motion.div
             key={pulse.id}
@@ -441,7 +513,7 @@ function HandoffPulseOverlay({ pulses, agents }: {
 // ─── Main component ────────────────────────────────────────────────────────────
 interface AgentGraphProps {
   agents: AgentNode[];
-  thoughts?:  Record<string, string>;
+  thoughts?: Record<string, string>;
   toolCalls?: Record<string, string>;
   tokenStats?: TokenStats;
   onFocusAgent?: (agentId: string | null) => void;
@@ -454,21 +526,23 @@ interface AgentGraphProps {
   focusedAgentIdFromTask?: string | null; // highlight driven by kanban click
   // Swarm hand-off pulses
   handoffPulses?: HandoffPulseEntry[];
+  agentProgress?: Record<string, number>;  // agentId → 0-100
 }
 
 export function AgentGraph({
   agents,
-  thoughts  = {},
+  thoughts = {},
   toolCalls = {},
   tokenStats,
   onFocusAgent,
   className,
   preparingSpawnSet = new Set(),
-  spawnedSet        = new Set(),
+  spawnedSet = new Set(),
   activeTasksByAgent = {},
-  managerPulse      = false,
+  managerPulse = false,
   focusedAgentIdFromTask,
   handoffPulses = [],
+  agentProgress = {},
 }: AgentGraphProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -476,7 +550,7 @@ export function AgentGraph({
   const [direction, setDirection] = useState<"TB" | "LR">("TB");
   const positionCache = useRef<Record<string, { x: number; y: number }>>({});
   // Track which ids we've already revealed (for isNewlySpawned)
-  const revealedRef  = useRef<Set<string>>(new Set());
+  const revealedRef = useRef<Set<string>>(new Set());
 
   // Merge external focus (from kanban) with internal focus
   const effectiveFocusId = focusedAgentIdFromTask ?? focusedId;
@@ -506,22 +580,24 @@ export function AgentGraph({
       if (isNewlySpawned) revealedRef.current.add(agent.id);
 
       return {
-        id:   agent.id,
+        id: agent.id,
         type: "agentNode",
         position: positionCache.current[agent.id] ?? { x: 0, y: 0 },
         data: {
           agent,
-          thought:  thoughts[agent.id],
+          agentName: getAgentName(agent.id, agent.role),
+          thought: thoughts[agent.id],
           toolCall: toolCalls[agent.id],
-          focused:  effectiveFocusId === agent.id,
-          isPreparing:  preparingSpawnSet.has(agent.id),
+          focused: effectiveFocusId === agent.id,
+          isPreparing: preparingSpawnSet.has(agent.id),
           isNewlySpawned,
           activeTaskTitle: activeTasksByAgent[agent.id],
-          isManagerPulsing: managerPulse && agent.role === "manager",
-          onFocus:  handleFocus,
+          isManagerPulsing: managerPulse && (agent.role === "manager" || agent.role === "swarm_dispatcher"),
+          agentProgress: agentProgress[agent.id],
+          onFocus: handleFocus,
         } as AgentNodeData,
         draggable: true,
-        width:  NODE_WIDTH,
+        width: NODE_WIDTH,
         height: NODE_HEIGHT,
       };
     });
@@ -529,28 +605,42 @@ export function AgentGraph({
     // Build agent lookup for parent role resolution
     const agentMap = new Map(agents.map(a => [a.id, a]));
 
+    // ── Synthesize parent edges from HANDOFF chain order for swarm agents ───────
+    // Swarm agents don't have parent_id set. We infer delegation by ordering:
+    // dispatcher is root, then first specialist, then subsequent roles are children
+    // of the agent that handed off to them (based on role sequence in handoff chain).
+    // We find the most recent handoff target for each role and wire edges.
+    const roleToAgent = new Map<string, AgentNode>();
+    for (const a of agents) {
+      // Prefer working/thinking agents over completed ones for role assignment
+      const existing = roleToAgent.get(a.role);
+      if (!existing || a.status === "working" || a.status === "thinking") {
+        roleToAgent.set(a.role, a);
+      }
+    }
+
     const newEdges: Edge[] = agents
       .filter(a => a.parent_id && agentMap.has(a.parent_id))
       .map(a => {
-        const parent    = agentMap.get(a.parent_id!)!;
-        const isActive  = a.status === "working" || a.status === "thinking";
-        const isDone    = a.status === "completed";
-        const isError   = a.status === "error";
-        const childCfg  = getRoleCfg(a.role);
+        const parent = agentMap.get(a.parent_id!)!;
+        const isActive = a.status === "working" || a.status === "thinking";
+        const isDone = a.status === "completed";
+        const isError = a.status === "error";
+        const childCfg = getRoleCfg(a.role);
 
-        const color = isError  ? "#ef4444"
-                    : isDone   ? "#10b98155"
-                    : isActive ? childCfg.accentColor
-                    :            "#334155";
+        const color = isError ? "#ef4444"
+          : isDone ? "#10b98155"
+            : isActive ? childCfg.accentColor
+              : "#334155";
 
         const strokeWidth = isActive ? 2.5 : 1.5;
 
         return {
-          id:        `e-${a.parent_id}-${a.id}`,
-          source:     a.parent_id!,
-          target:     a.id,
-          type:       "smoothstep",
-          animated:   isActive,
+          id: `e-${a.parent_id}-${a.id}`,
+          source: a.parent_id!,
+          target: a.id,
+          type: "smoothstep",
+          animated: isActive,
           style: {
             stroke: color,
             strokeWidth,
@@ -558,9 +648,9 @@ export function AgentGraph({
             filter: isActive ? `drop-shadow(0 0 5px ${childCfg.glowColor}90)` : undefined,
           },
           markerEnd: {
-            type:   MarkerType.ArrowClosed,
+            type: MarkerType.ArrowClosed,
             color,
-            width:  isActive ? 14 : 10,
+            width: isActive ? 14 : 10,
             height: isActive ? 14 : 10,
           },
           // Show delegation label when a manager spawns a child
@@ -573,9 +663,9 @@ export function AgentGraph({
               fontFamily: "monospace",
               opacity: isActive ? 1 : 0.55,
             },
-            labelBgStyle:        { fill: "#0f172a", fillOpacity: 0.9 },
-            labelBgPadding:       [3, 5] as [number, number],
-            labelBgBorderRadius:  4,
+            labelBgStyle: { fill: "#0f172a", fillOpacity: 0.9 },
+            labelBgPadding: [3, 5] as [number, number],
+            labelBgBorderRadius: 4,
           } : {}),
         };
       });
@@ -588,39 +678,39 @@ export function AgentGraph({
       .sort((a, b) => (a.created_at > b.created_at ? 1 : -1));
 
     for (let i = 1; i < rootManagers.length; i++) {
-      const prev    = rootManagers[i - 1];
-      const curr    = rootManagers[i];
-      const isDone  = prev.status === "completed";
+      const prev = rootManagers[i - 1];
+      const curr = rootManagers[i];
+      const isDone = prev.status === "completed";
       const isError = prev.status === "error";
       const prevCfg = getRoleCfg(prev.role);
-      const color   = isError ? "#ef444460" : isDone ? "#10b98155" : `${prevCfg.accentColor}60`;
+      const color = isError ? "#ef444460" : isDone ? "#10b98155" : `${prevCfg.accentColor}60`;
       newEdges.push({
-        id:       `e-chain-${prev.id}-${curr.id}`,
-        source:    prev.id,
-        target:    curr.id,
-        type:      "smoothstep",
-        animated:  false,
+        id: `e-chain-${prev.id}-${curr.id}`,
+        source: prev.id,
+        target: curr.id,
+        type: "smoothstep",
+        animated: false,
         style: {
-          stroke:          color,
-          strokeWidth:     1,
+          stroke: color,
+          strokeWidth: 1,
           strokeDasharray: "6 4",
         },
         markerEnd: {
-          type:   MarkerType.ArrowClosed,
+          type: MarkerType.ArrowClosed,
           color,
-          width:  8,
+          width: 8,
           height: 8,
         },
-        label:      "next task →",
+        label: "next task →",
         labelStyle: {
-          fill:       "#475569",
-          fontSize:   8,
+          fill: "#475569",
+          fontSize: 8,
           fontWeight: 600,
           fontFamily: "monospace",
-          opacity:    0.6,
+          opacity: 0.6,
         },
-        labelBgStyle:       { fill: "#0f172a", fillOpacity: 0.85 },
-        labelBgPadding:      [2, 4] as [number, number],
+        labelBgStyle: { fill: "#0f172a", fillOpacity: 0.85 },
+        labelBgPadding: [2, 4] as [number, number],
         labelBgBorderRadius: 3,
       });
     }
@@ -628,7 +718,7 @@ export function AgentGraph({
     setNodes(newNodes);
     setEdges(newEdges);
   }, [agents, thoughts, toolCalls, effectiveFocusId, direction, handleFocus,
-      preparingSpawnSet, activeTasksByAgent, managerPulse, setNodes, setEdges]);
+    preparingSpawnSet, activeTasksByAgent, managerPulse, setNodes, setEdges]);
 
   const onNodeDragStop: NodeMouseHandler = useCallback((_e, node) => {
     positionCache.current[node.id] = node.position;
@@ -647,7 +737,7 @@ export function AgentGraph({
     <div className={cn("h-full w-full flex flex-col", className)}>
       {/* Swarm handoff pulse overlay */}
       <HandoffPulseOverlay pulses={handoffPulses} agents={agents} />
-      <div className="flex-1 min-h-0 relative">
+      <div className="flex-1 min-h-0 relative w-full h-full" style={{ width: '100%', height: '100%' }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}

@@ -1,17 +1,21 @@
 """
 AgentHive Swarm Engine - Core Primitives
 
-Implements two primary primitives:
+Implements parallel swarm primitives:
   - SwarmContext: stateless, fully self-contained task context passed between routines
   - Transfer: a hand-off object returned by a routine to redirect execution
+  - ParallelBranch: a single branch in a parallel fan-out
+  - ParallelTransfer: fan-out to N branches running concurrently via asyncio.gather
+  - BranchResult: result from one completed parallel branch
   - SwarmRoutine: abstract base for all specialist routines
-  - Swarm: orchestrates the run loop, enforces hop limits, emits HANDOFF events
+  - Swarm: orchestrates the run loop (sequential OR parallel), enforces hop limits
   - run_swarm: convenience top-level coroutine
 
 Design constraints:
   - Stateless: every Transfer carries the complete context the next routine needs
   - No shared mutable globals between routine executions
-  - Max 12 hops per task to prevent infinite transfer loops
+  - Max 20 hops per task to prevent infinite transfer loops
+  - Parallel branches run concurrently and fan-in to a merge_routine
   - All hand-offs are logged as HANDOFF events visible in the dashboard
 """
 from __future__ import annotations
@@ -31,7 +35,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Maximum number of agent-to-agent hops before the swarm self-terminates
-_MAX_HOPS: int = 12
+# Set to 20 to allow: Dispatcher → UiUxScout → PixelCrafter → Guardian → [1 revision] → Guardian
+_MAX_HOPS: int = 20
 
 
 # ─── Swarm Context ────────────────────────────────────────────────────────────
@@ -73,6 +78,10 @@ class SwarmContext:
     hive: object | None = None          # HiveSession — set by Swarm before calling routine
     last_worker_role: str = ""          # Tracks who the Guardian should re-route to
     token_usage: dict = field(default_factory=dict)  # {role: {"input": N, "output": N, "cost": N}}
+    # ── Parallel execution support ──────────────────────────────────────────
+    branch_id: str = ""                                      # which parallel branch this ctx belongs to
+    branch_results: list[dict] = field(default_factory=list) # aggregated results from child branches
+    parallel_depth: int = 0                                  # nesting level of parallelism
 
     def append_history(self, role: str, content: str) -> "SwarmContext":
         """Return a new context with an additional history entry (non-mutating pattern)."""
@@ -163,20 +172,81 @@ class SwarmContext:
 @dataclass
 class Transfer:
     """
-    Returned by a SwarmRoutine.run() to hand off to the next routine.
-    Contains the full context so the receiving routine needs no external state.
+    Returned by a SwarmRoutine.run() to hand off to the next routine (sequential).
 
     Fields
     ------
     target_routine : Role identifier of the next routine to execute.
     context        : Fully populated SwarmContext (including updated history).
     reason         : Human-readable explanation of why the hand-off occurred.
-                     Shown in the dashboard feed as a HANDOFF event.
     """
 
     target_routine: str
     context: SwarmContext
     reason: str = ""
+
+
+# ─── Parallel Execution Primitives ───────────────────────────────────────────
+@dataclass
+class ParallelBranch:
+    """
+    Represents a single autonomous branch in a parallel fan-out.
+    Each branch runs its own sub-swarm chain independently.
+
+    Fields
+    ------
+    branch_id      : Unique identifier for this branch.
+    target_routine : Starting routine for this branch.
+    context        : Fully populated SwarmContext for this branch.
+    reason         : Why this branch was created.
+    """
+
+    branch_id: str
+    target_routine: str
+    context: SwarmContext
+    reason: str = ""
+
+
+@dataclass
+class ParallelTransfer:
+    """
+    Returned by a SwarmRoutine to fan-out into N parallel branches.
+    All branches run concurrently via asyncio.gather().
+    Results are collected into BranchResult list and merged by merge_routine.
+
+    Fields
+    ------
+    branches       : List of ParallelBranch to execute in parallel.
+    merge_routine  : Role of the routine that aggregates all branch results.
+    context        : Base context (will be enriched with branch_results).
+    reason         : Why parallel execution was chosen.
+    """
+
+    branches: list[ParallelBranch]
+    merge_routine: str
+    context: SwarmContext
+    reason: str = ""
+
+
+@dataclass
+class BranchResult:
+    """
+    Captures the outcome of a single parallel branch.
+
+    Fields
+    ------
+    branch_id   : Matches the ParallelBranch.branch_id.
+    role        : Final routine role that produced the output.
+    output      : Final string output (or error message).
+    success     : False if the branch raised an exception.
+    context     : Final SwarmContext after the branch completed.
+    """
+
+    branch_id: str
+    role: str
+    output: str
+    success: bool = True
+    context: SwarmContext | None = None
 
 
 # ─── SwarmRoutine (Abstract Base) ────────────────────────────────────────────
@@ -234,14 +304,11 @@ CRITICAL: Your response MUST end with exactly one action block. Do not ask quest
 # ─── Swarm Orchestrator ───────────────────────────────────────────────────────
 class Swarm:
     """
-    The Swarm orchestrator.
+    The Swarm orchestrator — supports both sequential and parallel execution.
 
-    Manages the active routine registry and drives the run loop:
-      1. Start with entry_routine and initial SwarmContext.
-      2. Call routine.run(ctx) — get back Transfer or str.
-      3. If Transfer: emit HANDOFF event, update context, switch to target routine.
-      4. If str (final answer): emit SWARM_DONE event, return.
-      5. Enforce max hop limit to prevent infinite loops.
+    Sequential: routine returns Transfer → linear hand-off chain.
+    Parallel:   routine returns ParallelTransfer → N branches run concurrently
+                via asyncio.gather(), results merged into merge_routine.
 
     The Swarm is stateless between tasks. Each run_swarm call is independent.
     """
@@ -253,6 +320,95 @@ class Swarm:
         """Register (or replace) a routine at runtime."""
         self._routines[routine.role] = routine
 
+    async def _run_branch(self, branch: "ParallelBranch") -> "BranchResult":
+        """
+        Run a single parallel branch as an independent sub-swarm.
+        Each branch starts at branch.target_routine and runs to completion.
+        """
+        branch_ctx = branch.context.with_role(branch.target_routine)
+        branch_ctx.branch_id = branch.branch_id
+
+        logger.info(
+            "[Swarm] branch=%s starting at role=%s task=%s",
+            branch.branch_id[:8], branch.target_routine, branch_ctx.task_id[:8],
+        )
+        try:
+            output = await self.run_swarm(
+                entry_role=branch.target_routine,
+                ctx=branch_ctx,
+            )
+            return BranchResult(
+                branch_id=branch.branch_id,
+                role=branch.target_routine,
+                output=output,
+                success=True,
+                context=branch_ctx,
+            )
+        except Exception as exc:
+            logger.error("[Swarm] branch=%s failed: %s", branch.branch_id[:8], exc)
+            return BranchResult(
+                branch_id=branch.branch_id,
+                role=branch.target_routine,
+                output=f"[branch error] {exc}",
+                success=False,
+                context=branch_ctx,
+            )
+
+    def _merge_branch_results(
+        self,
+        base_ctx: SwarmContext,
+        results: list["BranchResult | BaseException"],
+    ) -> SwarmContext:
+        """
+        Merge all branch results into a single SwarmContext.
+        Accumulated artifacts and branch outputs are stored in context_variables.
+        """
+        merged_results: list[dict] = []
+        merged_artifact_bus: dict = dict(base_ctx.artifact_bus)
+        merged_vars: dict = dict(base_ctx.context_variables)
+        merged_history: list[dict] = list(base_ctx.history)
+
+        for r in results:
+            if isinstance(r, BaseException):
+                merged_results.append({"success": False, "output": str(r), "role": "unknown"})
+                continue
+            merged_results.append({
+                "branch_id": r.branch_id,
+                "role": r.role,
+                "output": r.output[:500],
+                "success": r.success,
+            })
+            # Merge artifact bus from each branch
+            if r.context:
+                for k, v in r.context.artifact_bus.items():
+                    merged_artifact_bus[k] = v
+                for k, v in r.context.context_variables.items():
+                    if k not in ("branch_results", "prior_tasks"):
+                        merged_vars[k] = v
+                merged_history.extend(r.context.history[-3:])
+
+        # Store aggregated branch results for the merge_routine
+        merged_vars["branch_results"] = merged_results
+
+        return SwarmContext(
+            hive_id=base_ctx.hive_id,
+            task_id=base_ctx.task_id,
+            task_title=base_ctx.task_title,
+            task_description=base_ctx.task_description,
+            history=merged_history,
+            context_variables=merged_vars,
+            artifact_bus=merged_artifact_bus,
+            current_agent_role=base_ctx.current_agent_role,
+            handoff_chain=list(base_ctx.handoff_chain),
+            session_dir=base_ctx.session_dir,
+            budget_remaining=base_ctx.budget_remaining,
+            hive=base_ctx.hive,
+            last_worker_role=base_ctx.last_worker_role,
+            token_usage=dict(base_ctx.token_usage),
+            branch_results=merged_results,
+            parallel_depth=base_ctx.parallel_depth,
+        )
+
     async def run_swarm(
         self,
         entry_role: str,
@@ -260,15 +416,9 @@ class Swarm:
     ) -> str:
         """
         Execute the swarm loop starting from entry_role.
+        Supports both sequential (Transfer) and parallel (ParallelTransfer) execution.
 
-        Returns
-        -------
-        str : Final output produced by terminate_and_report.
-
-        Raises
-        ------
-        ValueError : If entry_role is not registered.
-        RuntimeError : If MAX_HOPS is exceeded (infinite loop guard).
+        Returns str — final output produced by terminate_and_report.
         """
         from app.events import emit_event
 
@@ -284,16 +434,14 @@ class Swarm:
                 logger.error("[Swarm] Routine not found for role=%s — terminating", current_role)
                 return f"[Swarm] Aborted: no routine registered for role={current_role}"
 
-            # Update context with current execution role
             ctx = ctx.with_role(current_role)
-
             logger.info("[Swarm] hop=%d role=%s task=%s", hop, current_role, ctx.task_id[:8])
 
             result = await routine.run(ctx)
             hop += 1
 
+            # ── Final answer ────────────────────────────────────────────────
             if isinstance(result, str):
-                # Final answer — routine terminated the swarm
                 emit_event(
                     "SWARM_DONE",  # type: ignore[arg-type]
                     hive_id=ctx.hive_id,
@@ -308,23 +456,19 @@ class Swarm:
                 logger.info("[Swarm] Completed in %d hops: %s", hop, ctx.task_title[:60])
                 return result
 
+            # ── Sequential hand-off ─────────────────────────────────────────
             if isinstance(result, Transfer):
                 from_role = current_role
                 to_role = result.target_routine
 
-                # Validate target is a known routine
                 if to_role not in self._routines:
-                    logger.warning(
-                        "[Swarm] Transfer to unknown routine %r — terminating", to_role
-                    )
+                    logger.warning("[Swarm] Transfer to unknown routine %r — terminating", to_role)
                     return f"[Swarm] Terminated: transfer to unknown routine {to_role!r}"
 
-                # Update handoff chain on the context
                 new_chain = list(result.context.handoff_chain) + [from_role]
                 result.context.handoff_chain = new_chain
                 result.context.last_worker_role = from_role
 
-                # Emit HANDOFF event (visible in dashboard feed as horizontal pulse)
                 emit_event(
                     "HANDOFF",  # type: ignore[arg-type]
                     hive_id=ctx.hive_id,
@@ -339,18 +483,72 @@ class Swarm:
                     },
                     role=from_role,
                 )
-
                 logger.info(
                     "[Swarm] HANDOFF hop=%d: %s -> %s | reason: %s",
                     hop, from_role, to_role, result.reason[:80],
                 )
-
                 ctx = result.context
                 current_role = to_role
-                await asyncio.sleep(0.1)  # yield to event loop between hops
+                await asyncio.sleep(0.05)
                 continue
 
-            # Unexpected return type — abort safely
+            # ── Parallel fan-out ────────────────────────────────────────────
+            if isinstance(result, ParallelTransfer):
+                from_role = current_role
+                n = len(result.branches)
+                logger.info(
+                    "[Swarm] PARALLEL_START hop=%d from=%s branches=%d merge_into=%s",
+                    hop, from_role, n, result.merge_routine,
+                )
+                emit_event(
+                    "PARALLEL_START",  # type: ignore[arg-type]
+                    hive_id=ctx.hive_id,
+                    agent_id="system",
+                    data={
+                        "from_role": from_role,
+                        "branches": [b.target_routine for b in result.branches],
+                        "merge_routine": result.merge_routine,
+                        "reason": result.reason,
+                        "hop": hop,
+                    },
+                    role=from_role,
+                )
+
+                # Run ALL branches concurrently — true parallel execution
+                branch_tasks = [self._run_branch(branch) for branch in result.branches]
+                raw_results = await asyncio.gather(*branch_tasks, return_exceptions=True)
+
+                # Fan-in: merge all branch results into one context
+                merged_ctx = self._merge_branch_results(result.context, list(raw_results))  # type: ignore
+                new_chain = list(merged_ctx.handoff_chain) + [from_role]
+                merged_ctx.handoff_chain = new_chain
+                merged_ctx.last_worker_role = from_role
+
+                success_count = sum(1 for r in raw_results if isinstance(r, BranchResult) and r.success)
+                emit_event(
+                    "PARALLEL_MERGE",  # type: ignore[arg-type]
+                    hive_id=ctx.hive_id,
+                    agent_id="system",
+                    data={
+                        "merge_routine": result.merge_routine,
+                        "branches_total": n,
+                        "branches_ok": success_count,
+                        "hop": hop,
+                    },
+                    role=result.merge_routine,
+                )
+                logger.info(
+                    "[Swarm] PARALLEL_MERGE: %d/%d branches succeeded → %s",
+                    success_count, n, result.merge_routine,
+                )
+
+                ctx = merged_ctx
+                current_role = result.merge_routine
+                hop += n  # count branch hops toward limit
+                await asyncio.sleep(0.05)
+                continue
+
+            # Unexpected return type
             logger.error("[Swarm] Unexpected return type from %s: %r", current_role, type(result))
             return f"[Swarm] Aborted: unexpected return type from routine {current_role}"
 
@@ -377,18 +575,6 @@ async def run_swarm(
     entry_role: str,
     ctx: SwarmContext,
 ) -> str:
-    """
-    Convenience wrapper: build a Swarm from routines list and run it.
-
-    Parameters
-    ----------
-    routines   : List of SwarmRoutine instances to register.
-    entry_role : Role identifier of the first routine to execute.
-    ctx        : Initial SwarmContext for the task.
-
-    Returns
-    -------
-    str : Final output from terminate_and_report.
-    """
+    """Convenience wrapper: build a Swarm from routines list and run it."""
     swarm = Swarm(routines)
     return await swarm.run_swarm(entry_role, ctx)

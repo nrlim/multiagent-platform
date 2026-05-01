@@ -35,6 +35,9 @@ EventType = Literal[
     # ── Swarm events ──────────────────────────────────────────────────────
     "HANDOFF",         # Agent-to-agent transfer in the swarm (from_role → to_role)
     "SWARM_DONE",      # Swarm task terminated via terminate_and_report
+    # ── Parallel swarm events ─────────────────────────────────────────────
+    "PARALLEL_START",  # Fan-out: multiple branches started concurrently
+    "PARALLEL_MERGE",  # Fan-in: all parallel branches complete, merging results
 ]
 
 REDIS_CHANNEL = "agenthive:events"

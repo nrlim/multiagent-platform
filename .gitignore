@@ -49,6 +49,7 @@ next-env.d.ts
 
 # ─── Workspace (Agent Output) ──────────────────────────────────────────────
 # We usually want to ignore the recursive dependencies and builds inside agent workspaces
+workspace/*
 workspace/**/node_modules/
 workspace/**/.next/
 workspace/**/dist/

@@ -49,6 +49,15 @@ const PROVIDERS = [
     dbKey: "deepseek_key",
     setKey: "deepseek_key_set",
   },
+  {
+    id: "kimi", name: "Kimi (Moonshot)", color: "text-violet-600",
+    bg: "bg-violet-50 border-violet-200",
+    models: ["kimi-k2.6", "kimi-k2.5", "kimi-k2-0905-preview"],
+    costPer1k: 0.0012, docsUrl: "https://platform.kimi.ai/",
+    envKey: "KIMI_API_KEY",
+    dbKey: "kimi_key",
+    setKey: "kimi_key_set",
+  },
 ] as const;
 
 // ─── Settings Card ────────────────────────────────────────────────────────────
@@ -200,7 +209,7 @@ export default function SettingsPage() {
   const [review, setReview] = useState(false);
   const [budget, setBudget] = useState(budgetLimit);
   const [isLoading, setIsLoading] = useState(true);
-  const [dbKeysSetup, setDbKeysSetup] = useState({ google: false, openai: false, anthropic: false, deepseek: false });
+  const [dbKeysSetup, setDbKeysSetup] = useState({ google: false, openai: false, anthropic: false, deepseek: false, kimi: false });
 
   useEffect(() => {
     async function load() {
@@ -216,6 +225,7 @@ export default function SettingsPage() {
           openai: d.openai_key_set,
           anthropic: d.anthropic_key_set,
           deepseek: d.deepseek_key_set ?? false,
+          kimi: d.kimi_key_set ?? false,
         });
 
         // Sync local store
@@ -306,7 +316,7 @@ export default function SettingsPage() {
             }
           >
             {/* Provider Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
               {PROVIDERS.map((p) => {
                 const isActive = activeProvider === p.id;
                 return (

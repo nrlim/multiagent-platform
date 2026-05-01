@@ -9,6 +9,7 @@ export interface SystemSettings {
   openai_key_set: boolean;
   anthropic_key_set: boolean;
   deepseek_key_set: boolean;
+  kimi_key_set: boolean;
   budget_limit: number;
   run_qa: boolean;
   require_review: boolean;
@@ -20,7 +21,7 @@ export async function fetchSystemSettings(): Promise<SystemSettings> {
   return res.json();
 }
 
-export async function updateSystemSettings(data: Partial<SystemSettings & { google_key?: string, openai_key?: string, anthropic_key?: string, deepseek_key?: string }>): Promise<void> {
+export async function updateSystemSettings(data: Partial<SystemSettings & { google_key?: string, openai_key?: string, anthropic_key?: string, deepseek_key?: string, kimi_key?: string }>): Promise<void> {
   const res = await fetch(`${ENGINE_BASE}/settings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -259,6 +260,15 @@ export async function getSessionWorkspace(sessionId: string): Promise<FileNode[]
   return buildTree(data.entries ?? []);
 }
 
+export async function renameWorkspaceFile(oldPath: string, newPath: string, hiveId?: string | null): Promise<boolean> {
+  const res = await fetch(`${ENGINE_BASE}/workspace/file/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ old_path: oldPath, new_path: newPath, hive_id: hiveId }),
+  });
+  return res.ok;
+}
+
 // ─── Providers ────────────────────────────────────────────────────────────────
 export async function getProviders() {
   const res = await fetch(`${ENGINE_BASE}/providers`);
@@ -336,12 +346,16 @@ function buildTree(flat: FileNode[]): FileNode[] {
 export type BucketPriority = "LOW" | "MEDIUM" | "HIGH";
 export type BucketStatus   = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "CANCELLED";
 
+export type BucketCardType = "STORY" | "TASK" | "BUG";
+
 export interface BucketTask {
   id: string;
   title: string;
   description: string;
   priority: BucketPriority;
   status: BucketStatus;
+  card_type: BucketCardType;
+  story_id: string | null;
   hive_id: string | null;
   assigned_agent_id: string | null;
   assigned_role: string | null;
@@ -392,15 +406,33 @@ export interface BucketStartResponse {
 export async function createBucketTask(
   title: string,
   description = "",
-  priority: BucketPriority = "MEDIUM"
+  priority: BucketPriority = "MEDIUM",
+  card_type: BucketCardType = "TASK",
+  story_id?: string | null,
 ): Promise<BucketTask> {
   const res = await fetch(`${ENGINE_BASE}/bucket/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, description, priority }),
+    body: JSON.stringify({ title, description, priority, card_type, story_id }),
   });
   if (!res.ok) throw new Error(`createBucketTask failed: ${res.statusText}`);
   return res.json();
+}
+
+export async function createBucketStory(
+  title: string,
+  description = "",
+  priority: BucketPriority = "MEDIUM",
+): Promise<BucketTask> {
+  return createBucketTask(title, description, priority, "STORY");
+}
+
+export async function createBucketBug(
+  title: string,
+  description = "",
+  story_id?: string | null,
+): Promise<BucketTask> {
+  return createBucketTask(title, description, "HIGH", "BUG", story_id);
 }
 
 export async function listBucketTasks(status?: BucketStatus): Promise<BucketTask[]> {

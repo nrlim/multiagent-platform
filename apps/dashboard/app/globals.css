@@ -2,6 +2,11 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Explicitly tell Tailwind v4 where to scan for class usage (required in pnpm monorepos) */
+@source "./**/*.{ts,tsx,js,jsx}";
+@source "../components/**/*.{ts,tsx,js,jsx}";
+@source "../lib/**/*.{ts,tsx,js,jsx}";
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -113,12 +118,16 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    @apply font-sans;
+    height: 100%;
+    overflow: hidden;
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
-  }
-  html {
-    @apply font-sans;
+    height: 100%;
+    overflow: hidden;
   }
 
   /* Professional slim scrollbar */
@@ -253,3 +262,21 @@
   transition: background-color 0.1s ease;
 }
 .data-table-row:hover { background-color: #f8fafc; }
+
+/* ── Custom scrollbar utility (file tree, etc.) ────────────────────────────── */
+.custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 999px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+
+/* ── Monaco editor container fix ──────────────────────────────────────────── */
+/* Prevent Monaco from leaking outside its flex container */
+.monaco-editor-wrapper {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.monaco-editor-wrapper .overflow-guard {
+  border-radius: 0 !important;
+}

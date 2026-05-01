@@ -4,14 +4,14 @@ AgentHive Engine - Bucket Dispatcher (Swarm Edition)
 The Dispatcher drives the Factory loop that drains the BucketQueue.
 Each task is executed by the Agent Swarm starting from the SwarmDispatcher
 routine and autonomously handed off between specialist routines until the
-Guardian calls terminate_and_report.
+QA Engineer calls terminate_and_report.
 
 Flow:
   1. POST /bucket/start  → start_factory()
   2. Factory dequeues BucketTask → _run_dispatcher_for_task()
   3. SwarmContext built → run_swarm(entry="swarm_dispatcher")
-  4. Routines hand off autonomously: Dispatcher → [UiUxScout | LogicWeaver | PixelCrafter] → Guardian
-  5. Guardian terminates → task marked COMPLETED → next task
+  4. Routines hand off autonomously: Dispatcher → [UiUxScout | BackendDev | FrontendDev] → QA Engineer
+  5. QA Engineer terminates → task marked COMPLETED → next task
 """
 from __future__ import annotations
 
@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 # ── Factory State ──────────────────────────────────────────────────────────────
 # Tracks active factory run per hive_id
 _running_factories: dict[str, asyncio.Task] = {}
+
+# Max tasks processed concurrently (tunable)
+MAX_CONCURRENT_TASKS: int = 3
 
 
 async def run_business_analyst(
@@ -154,13 +157,17 @@ Output ONLY action blocks. Do not write any code or explanations outside the blo
             title       = str(action.get("title", "Untitled Task"))[:200]
             description = str(action.get("description", ""))
             priority    = str(action.get("priority", "MEDIUM")).upper()
+            card_type   = str(action.get("card_type", "STORY")).upper()
             if priority not in ("HIGH", "MEDIUM", "LOW"):
                 priority = "MEDIUM"
+            if card_type not in ("STORY", "TASK", "BUG"):
+                card_type = "STORY"
 
             task = await bucket_queue.enqueue(
                 title=title,
                 description=description,
                 priority=priority,
+                card_type=card_type,
             )
             created_tasks.append(task.to_dict())
 
@@ -321,8 +328,8 @@ async def run_factory(
     stop_on_failure: bool = False,
 ) -> None:
     """
-    Main factory loop. Drains the BucketQueue until empty (or killed/stopped).
-    This runs as a background asyncio task.
+    Main factory loop — drains BucketQueue with parallel task execution.
+    Up to MAX_CONCURRENT_TASKS tasks run concurrently via asyncio.Semaphore.
     """
     hive_id = hive.id
     _hive_char_counters[hive_id] = 0
@@ -331,9 +338,9 @@ async def run_factory(
 
     emit = lambda level, msg: hive.add_log(level, f"[FACTORY] {msg}", agent_id="system")
 
-    emit("info", "AgentHive Factory starting...")
+    emit("info", "AgentHive Factory starting (parallel mode)...")
     emit("info", f"Provider: {hive.provider} | Model: {hive.model}")
-    emit("info", f"Budget limit: ${budget_limit:.2f}")
+    emit("info", f"Budget limit: ${budget_limit:.2f} | Concurrency: {MAX_CONCURRENT_TASKS}")
 
     await db_upsert_hive(hive_id, "(factory mode)", hive.provider, hive.model, "running", budget_limit)
 
@@ -341,37 +348,25 @@ async def run_factory(
     session_dir.mkdir(parents=True, exist_ok=True)
     emit("info", f"Workspace: {session_dir.name}")
 
-    artifact_history: list[str] = []   # context stitching buffer
+    artifact_history: list[str] = []
     tasks_done = 0
     tasks_failed = 0
+    active_tasks: dict[str, asyncio.Task] = {}   # task_id → asyncio.Task
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
     emit_event("FACTORY_START", hive_id, "system", {
         "provider": hive.provider,
         "model": hive.model,
         "pending": bucket_queue.get_progress()["pending"],
+        "concurrency": MAX_CONCURRENT_TASKS,
     })
 
-    try:
-        while True:
-            # Check kill flag
+    async def _run_task_guarded(task: "BucketTask") -> tuple[bool, str]:
+        """Run a single task inside the semaphore so concurrency stays bounded."""
+        async with semaphore:
             if _is_killed(hive_id):
-                emit("error", "Factory killed (budget exceeded or manual stop).")
-                break
-
-            # Dequeue next task
-            task = await bucket_queue.dequeue()
-            if task is None:
-                emit("info", "Queue empty — factory idle, waiting for new tasks...")
-                # Wait for more tasks (or timeout after 30s)
-                try:
-                    await asyncio.wait_for(bucket_queue.wait_for_work(), timeout=30.0)
-                    continue
-                except asyncio.TimeoutError:
-                    emit("info", "Factory idle timeout — shutting down.")
-                    break
-
-            # Dispatch the task
-            success, summary = await _run_dispatcher_for_task(
+                return False, ""
+            return await _run_dispatcher_for_task(
                 task=task,
                 hive=hive,
                 session_dir=session_dir,
@@ -380,19 +375,20 @@ async def run_factory(
                 run_qa=run_qa,
             )
 
+    def _on_task_done(task_id: str, fut: asyncio.Task) -> None:
+        """Callback fired when a guarded task finishes."""
+        nonlocal tasks_done, tasks_failed
+        active_tasks.pop(task_id, None)
+        try:
+            success, summary = fut.result()
             if success:
                 tasks_done += 1
                 if summary:
                     artifact_history.append(summary)
                     if len(artifact_history) > 10:
-                        artifact_history = artifact_history[-10:]
+                        artifact_history[:] = artifact_history[-10:]
             else:
                 tasks_failed += 1
-                if stop_on_failure:
-                    emit("error", f"Stopping factory due to task failure (stop_on_failure=True).")
-                    break
-
-            # Emit progress update
             progress = bucket_queue.get_progress()
             emit_event("FACTORY_PROGRESS", hive_id, "system", {
                 "tasks_done": tasks_done,
@@ -400,15 +396,58 @@ async def run_factory(
                 **progress,
             })
             emit("info", f"Progress: {tasks_done} done, {tasks_failed} failed, {progress['pending']} pending")
+            if not success and stop_on_failure:
+                _hive_killed[hive_id] = True
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            tasks_failed += 1
+            emit("error", f"Task result error: {exc}")
 
-            await asyncio.sleep(0.5)   # brief pause between tasks
+    try:
+        while True:
+            if _is_killed(hive_id):
+                emit("error", "Factory killed (budget exceeded or manual stop).")
+                break
+
+            # Drain queue: enqueue as many tasks as the semaphore allows
+            dequeued_any = False
+            while len(active_tasks) < MAX_CONCURRENT_TASKS:
+                task = await bucket_queue.dequeue()
+                if task is None:
+                    break
+                dequeued_any = True
+                fut = asyncio.create_task(_run_task_guarded(task))
+                active_tasks[task.id] = fut
+                fut.add_done_callback(lambda f, tid=task.id: _on_task_done(tid, f))
+                emit("info", f"[⨂] Dispatching task in parallel: {task.title[:60]}")
+
+            if not dequeued_any and not active_tasks:
+                emit("info", "Queue empty — factory idle, waiting for new tasks...")
+                try:
+                    await asyncio.wait_for(bucket_queue.wait_for_work(), timeout=30.0)
+                    continue
+                except asyncio.TimeoutError:
+                    emit("info", "Factory idle timeout — shutting down.")
+                    break
+
+            # Yield control so active tasks can make progress
+            await asyncio.sleep(0.5)
 
     except asyncio.CancelledError:
         emit("warning", "Factory task cancelled.")
+        # Cancel all active tasks gracefully
+        for fut in active_tasks.values():
+            fut.cancel()
+        if active_tasks:
+            await asyncio.gather(*active_tasks.values(), return_exceptions=True)
     except Exception as exc:
         emit("error", f"Factory crashed: {type(exc).__name__}: {exc}")
         logger.exception("[Factory] Unhandled error in run_factory")
     finally:
+        # Wait for any still-running tasks
+        if active_tasks:
+            await asyncio.gather(*active_tasks.values(), return_exceptions=True)
         hive.complete(success=(tasks_failed == 0))
         final_status = "completed" if tasks_failed == 0 and tasks_done > 0 else "failed"
         await db_upsert_hive(hive_id, "(factory mode)", hive.provider, hive.model, final_status, budget_limit)

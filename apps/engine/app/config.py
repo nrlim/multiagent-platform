@@ -3,6 +3,7 @@ AgentHive Engine - Configuration & Settings (Phase 3)
 """
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load .env from engine directory
@@ -26,17 +27,20 @@ GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+KIMI_API_KEY: str = os.getenv("KIMI_API_KEY", "")
 
 GOOGLE_MODEL: str = os.getenv("GOOGLE_MODEL", "gemini-2.0-flash")
 OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
 ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+KIMI_MODEL: str = os.getenv("KIMI_MODEL", "kimi-k2.6")
 
 DEFAULT_MODELS: dict[str, str] = {
     "google": GOOGLE_MODEL,
     "openai": OPENAI_MODEL,
     "anthropic": ANTHROPIC_MODEL,
     "deepseek": DEEPSEEK_MODEL,
+    "kimi": KIMI_MODEL,
 }
 
 # ─── Phase 3: Redis & Database ────────────────────────────────────────────────
